@@ -13,7 +13,7 @@
 #include "GCodes/GCodeBuffer.h"
 
 
-LinearDeltaKinematics::LinearDeltaKinematics() : Kinematics(KinematicsType::linearDelta, -1.0, 0.0, true)
+LinearDeltaKinematics::LinearDeltaKinematics() : Kinematics(KinematicsType::linearDelta, -1.0, 0.0, true, false)
 {
 	Init();
 }
@@ -40,6 +40,7 @@ void LinearDeltaKinematics::Init()
 		towerX[axis] = towerY[axis] = 0.0;
 	}
 
+	reprap.GetGCodes().SetMachineAxisLetters(MachineAxisNames(), 3);
 	Recalc();
 }
 

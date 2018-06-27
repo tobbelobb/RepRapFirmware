@@ -143,7 +143,7 @@ void Move::Init()
 	simulationMode = 0;
 	simulationTime = 0.0;
 	longestGcodeWaitInterval = 0;
-	specialMoveAvailable = false;
+	adjustLeadScrewsMoveAvailable = false;
 
 	active = true;
 }
@@ -236,8 +236,8 @@ void Move::Spin()
 
 	if (canAddMove)
 	{
-		// OK to add another move. First check if a special move is available.
-		if (specialMoveAvailable)
+		// OK to add another move. First check if an adjust-lead-screw move is available.
+		if (adjustLeadScrewsMoveAvailable)
 		{
 			if (simulationMode < 2)
 			{
@@ -259,7 +259,7 @@ void Move::Spin()
 					}
 				}
 			}
-			specialMoveAvailable = false;
+			adjustLeadScrewsMoveAvailable = false;
 		}
 		else
 		{
@@ -274,6 +274,11 @@ void Move::Spin()
 						AxisAndBedTransform(nextMove.coords, nextMove.xAxes, nextMove.yAxes, true);
 					}
 
+                    // TODO: Hangprinter G1 S2 moves will get a IsRawMotorMove == true
+                    // so doMotorMapping = !IsRawMove == false
+                    // But Hangprinter must always do motor mapping
+                    // because otherwise we run into the faulty assumption that
+                    // axis position and step count correlate linearly
 					if (ddaRingAddPointer->Init(nextMove, !IsRawMotorMove(nextMove.moveType)))
 					{
 						ddaRingAddPointer = ddaRingAddPointer->GetNext();
@@ -686,7 +691,7 @@ void Move::Diagnostics(MessageType mtype)
 void Move::SetNewPosition(const float positionNow[MaxTotalDrivers], bool doBedCompensation)
 {
 	float newPos[MaxTotalDrivers];
-	memcpy(newPos, positionNow, sizeof(newPos));			// copy to local storage because Transform modifies it
+	memcpy(newPos, positionNow, sizeof(newPos[0]) * MaxTotalDrivers);			// copy to local storage because Transform modifies it
 	AxisAndBedTransform(newPos, reprap.GetCurrentXAxes(), reprap.GetCurrentYAxes(), doBedCompensation);
 	SetLiveCoordinates(newPos);
 	SetPositions(newPos);
@@ -718,6 +723,9 @@ void Move::EndPointToMachine(const float coords[], int32_t ep[], size_t numDrive
 	}
 }
 
+// Warning! This function assumes linear relationship
+// between motor position and effector position
+// Will Not Work for Hangprinter
 // Convert distance to steps for a particular drive
 int32_t Move::MotorMovementToSteps(size_t drive, float coord)
 {
@@ -1062,15 +1070,18 @@ void Move::AdjustMotorPositions(const float_t adjustment[], size_t numMotors)
 // This is called from the step ISR when the current move has been completed
 void Move::CurrentMoveCompleted()
 {
-	// Save the current motor coordinates, and the machine Cartesian coordinates if known
-	liveCoordinatesValid = currentDda->FetchEndPosition(const_cast<int32_t*>(liveEndPoints), const_cast<float *>(liveCoordinates));
-	const size_t numAxes = reprap.GetGCodes().GetTotalAxes();
-	for (size_t drive = numAxes; drive < MaxTotalDrivers; ++drive)
+	if (currentDda->GetAlterPositionState())
 	{
-		extrusionAccumulators[drive - numAxes] += currentDda->GetStepsTaken(drive);
-		if (currentDda->IsNonPrintingExtruderMove(drive))
+		// Save the current motor coordinates, and the machine Cartesian coordinates if known
+		liveCoordinatesValid = currentDda->FetchEndPosition(const_cast<int32_t*>(liveEndPoints), const_cast<float *>(liveCoordinates));
+		const size_t numAxes = reprap.GetGCodes().GetTotalAxes();
+		for (size_t drive = numAxes; drive < MaxTotalDrivers; ++drive)
 		{
-			extruderNonPrinting[drive - numAxes] = true;
+			extrusionAccumulators[drive - numAxes] += currentDda->GetStepsTaken(drive);
+			if (currentDda->IsNonPrintingExtruderMove(drive))
+			{
+				extruderNonPrinting[drive - numAxes] = true;
+			}
 		}
 	}
 	currentDda = nullptr;
@@ -1123,6 +1134,9 @@ void Move::GetCurrentMachinePosition(float m[MaxAxes], bool disableMotorMapping)
 	}
 }
 
+// Warning! This function assumes linear relationship
+// between motor position and effector position
+// Should never be called when controlling a Hangprinter
 /*static*/ float Move::MotorStepsToMovement(size_t drive, int32_t endpoint)
 {
 	return ((float)(endpoint))/reprap.GetPlatform().DriveStepsPerUnit(drive);
@@ -1307,7 +1321,7 @@ void Move::AdjustLeadscrews(const floatc_t corrections[])
 			specialMoveCoords[config.driverNumbers[i]] = corrections[i];
 		}
 	}
-	specialMoveAvailable = true;
+	adjustLeadScrewsMoveAvailable = true;
 }
 
 // Return the idle timeout in seconds

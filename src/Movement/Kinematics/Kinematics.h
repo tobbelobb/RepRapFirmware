@@ -130,6 +130,10 @@ public:
 	// Override this if the homing buttons are not named after the axes (e.g. SCARA printer)
 	virtual const char* HomingButtonNames() const { return "XYZUVWABC"; }
 
+	// Some gcodes want to refer to each individual movement motor.
+	// Override this to enable parameter names that matches the motor names of your kinematics
+	virtual const char* MachineAxisNames() const { return "XYZ"; }
+
 	// This function is called when a request is made to home the axes in 'toBeHomed' and the axes in 'alreadyHomed' have already been homed.
 	// If we can't proceed because other axes need to be homed first, return those axes.
 	// If we can proceed with homing some axes, set 'filename' to the name of the homing file to be called and return 0. Optionally, update 'alreadyHomed' to indicate
@@ -162,6 +166,12 @@ public:
 	// The speeds along individual Cartesian axes have already been limited before this is called.
 	virtual void LimitSpeedAndAcceleration(DDA& dda, const float *normalisedDirectionVector) const = 0;
 
+	// Given a motor angle relative to that in the origin, what is our position along that axis?
+	virtual float MotorAngToAxisPosition(float ang, uint32_t fullStepsPerRevolution, const float stepsPerMm[], size_t axis);
+
+	// How many full steps does the motor on the axis have?
+	virtual uint32_t GetFullStepsPerMotorRev(size_t axis);
+
 	// Return true if the specified axis is a continuous rotation axis
 	virtual bool IsContinuousRotationAxis(size_t axis) const { return false; }
 
@@ -177,12 +187,13 @@ public:
 
 	bool UseSegmentation() const { return useSegmentation; }
 	bool UseRawG0() const { return useRawG0; }
+	bool UseSegmentationZ() const { return useSegmentationZ; }
 	float GetSegmentsPerSecond() const pre(UseSegmentation()) { return segmentsPerSecond; }
 	float GetMinSegmentLength() const pre(UseSegmentation()) { return minSegmentLength; }
 
 protected:
 	// Constructor. Pass segsPerSecond <= 0.0 to get non-segmented motion.
-	Kinematics(KinematicsType t, float segsPerSecond, float minSegLength, bool doUseRawG0);
+	Kinematics(KinematicsType t, float segsPerSecond, float minSegLength, bool doUseRawG0, bool doUseSegmentationZ);
 
 	// Apply the M208 limits to the Cartesian position that the user wants to move to for all axes from the specified one upwards
 	// Return true if any coordinates were changed
@@ -200,6 +211,7 @@ protected:
 private:
 	bool useSegmentation;					// true if we have to approximate linear movement using segmentation
 	bool useRawG0;							// true if we normally use segmentation but we do not need to segment travel moves
+	bool useSegmentationZ;					// true if we have to approximate linear movement using segmentation, even along Z
 	KinematicsType type;
 };
 

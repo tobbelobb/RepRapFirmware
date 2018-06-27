@@ -24,9 +24,15 @@
 const char * const Kinematics::HomeAllFileName = "homeall.g";
 
 // Constructor. Pass segsPerSecond <= 0.0 to get non-segmented kinematics.
-Kinematics::Kinematics(KinematicsType t, float segsPerSecond, float minSegLength, bool doUseRawG0)
-	: segmentsPerSecond(segsPerSecond), minSegmentLength(minSegLength), useSegmentation(segsPerSecond > 0.0), useRawG0(doUseRawG0), type(t)
+Kinematics::Kinematics(KinematicsType t, float segsPerSecond, float minSegLength, bool doUseRawG0, bool doUseSegmentationZ)
+	: segmentsPerSecond(segsPerSecond),
+	minSegmentLength(minSegLength),
+	useSegmentation(segsPerSecond > 0.0),
+	useRawG0(doUseRawG0),
+	useSegmentationZ(segsPerSecond > 0.0 && doUseSegmentationZ),
+	type(t)
 {
+	reprap.GetGCodes().SetMachineAxisLetters(MachineAxisNames(), 3);
 }
 
 // Set or report the parameters from a M665, M666 or M669 command
@@ -54,6 +60,21 @@ bool Kinematics::IsReachable(float x, float y, bool isCoordinated) const
 {
 	const Platform& platform = reprap.GetPlatform();
 	return x >= platform.AxisMinimum(X_AXIS) && y >= platform.AxisMinimum(Y_AXIS) && x <= platform.AxisMaximum(X_AXIS) && y <= platform.AxisMaximum(Y_AXIS);
+}
+
+float Kinematics::MotorAngToAxisPosition(float ang, uint32_t fullStepsPerRevolution, const float stepsPerMm[], size_t axis)
+{
+	bool dummy;
+	const Platform& platform = reprap.GetPlatform();
+	const AxisDriversConfig& axisConfig = platform.GetAxisDriversConfig(axis);
+	uint8_t driver = axisConfig.driverNumbers[0]; // Only supports single driver
+	float stepsPerRevolution = fullStepsPerRevolution * platform.GetMicrostepping(driver, dummy);
+	return (stepsPerRevolution / stepsPerMm[axis]) * ang / 360.0;
+}
+
+uint32_t Kinematics::GetFullStepsPerMotorRev(size_t axis)
+{
+	return 200;
 }
 
 // Limit the Cartesian position that the user wants to move to, returning true if any coordinates were changed

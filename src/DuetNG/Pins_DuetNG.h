@@ -50,10 +50,11 @@ constexpr size_t MaxAxes = 9;						// The maximum number of movement axes in the
 constexpr size_t MaxExtruders = NumDirectDrivers - MinAxes;	// The maximum number of extruders
 constexpr size_t MaxDriversPerAxis = 5;				// The maximum number of stepper drivers assigned to one axis
 
-constexpr size_t NUM_SERIAL_CHANNELS = 2;			// The number of serial IO channels not counting the WiFi serial connection (USB and one auxiliary UART)
+constexpr size_t NUM_SERIAL_CHANNELS = 3;			// The number of serial IO channels not counting the WiFi serial connection
 #define SERIAL_MAIN_DEVICE SerialUSB
 #define SERIAL_AUX_DEVICE Serial
 #define SERIAL_WIFI_DEVICE Serial1
+#define SERIAL_STOLEN_DEVICE Serial2				// The stolen device will be local shared between GCodes3.cpp, ODrive.cpp and SharedSpi.cpp
 
 constexpr Pin UsbVBusPin = 54;						// Pin used to monitor VBUS on USB port
 

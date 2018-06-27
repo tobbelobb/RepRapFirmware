@@ -55,6 +55,8 @@
 # include "Movement/StepperDrivers/TMC51xx.h"
 #endif
 
+#include "ODrive.h"
+
 #if HAS_WIFI_NETWORKING
 # include "FirmwareUpdater.h"
 #endif
@@ -376,6 +378,8 @@ void Platform::Init()
 		motorCurrents[drive] = 0.0;
 		motorCurrentFraction[drive] = 1.0;
 		driverState[drive] = DriverStatus::disabled;
+		i2cValues[drive] = 0;						// drives don't get forwarded gcodes via i2c by default
+		invertReportedAngle[drive] = false;			// don't invert reported angle by default
 
 		// Map axes and extruders straight through
 		driveDriverBits[drive] = driveDriverBits[drive + MaxTotalDrivers] = CalcDriverBitmap(drive);	// this returns 0 for remote drivers
@@ -881,6 +885,57 @@ void Platform::SetZProbeModState(bool b) const
 bool Platform::HomingZWithProbe() const
 {
 	return zProbeType != ZProbeType::none && (endStopInputType[Z_AXIS] == EndStopInputType::zProbe || endStopPos[Z_AXIS] == EndStopPosition::noEndStop);
+}
+
+size_t Platform::RegisterI2cAddrUsage(uint8_t addr)
+{
+	// Fill the addr into the first available spot
+	bool registered = false;
+	for (size_t i = 0; i < MAX_TRACK_I2C_ADDRS; i++)
+	{
+		if (registeredAddrs[i] == 0)
+		{
+			registeredAddrs[i] = addr;
+			registered = true;
+			break;
+		}
+	}
+	if (!registered) // Array full, could not register
+	{
+		return MAX_TRACK_I2C_ADDRS;
+	}
+
+	// Count how many times addr is registered (including this time)
+	uint8_t addrUsers = 0;
+	for (size_t i = 0; i < MAX_TRACK_I2C_ADDRS; i++)
+	{
+		if (addr != 0 && addr == registeredAddrs[i]) {
+			addrUsers++;
+		}
+	}
+	return addrUsers;
+}
+
+size_t Platform::UnregisterI2cAddrUsage(uint8_t addr)
+{
+	// Wipe out zero or one occurence of addr
+	for (size_t i = 0; i < MAX_TRACK_I2C_ADDRS; i++)
+	{
+		if (addr != 0 && addr == registeredAddrs[i]) {
+			registeredAddrs[i] = 0;
+			break;
+		}
+	}
+
+	// Count how many registered uses of addr is left
+	uint8_t addrUsers = 0;
+	for (size_t i = 0; i < MAX_TRACK_I2C_ADDRS; i++)
+	{
+		if (addr != 0 && addr == registeredAddrs[i]) {
+			addrUsers++;
+		}
+	}
+	return addrUsers;
 }
 
 // Check the prerequisites for updating the main firmware. Return True if satisfied, else print a message to 'reply' and return false.
@@ -3310,6 +3365,11 @@ void Platform::SetEnableValue(size_t driver, int8_t eVal)
 #endif
 }
 
+void Platform::SetExternalI2C(size_t driver, uint8_t addr)
+{
+	i2cValues[driver] = addr;
+}
+
 void Platform::SetAxisDriversConfig(size_t axis, const AxisDriversConfig& config)
 {
 	axisDrivers[axis] = config;
@@ -3948,7 +4008,8 @@ void Platform::SetBaudRate(size_t chan, uint32_t br)
 
 uint32_t Platform::GetBaudRate(size_t chan) const
 {
-	return (chan < NUM_SERIAL_CHANNELS) ? baudRates[chan] : 0;
+	return (chan < NUM_SERIAL_CHANNELS) ? baudRates[chan] :
+		(chan == 99) ? baudRates[NUM_SERIAL_CHANNELS-1] : 0;
 }
 
 void Platform::SetCommsProperties(size_t chan, uint32_t cp)
@@ -3988,7 +4049,6 @@ void Platform::ResetChannel(size_t chan)
 		SERIAL_AUX2_DEVICE.begin(baudRates[2]);
 		break;
 #endif
-
 	default:
 		break;
 	}
@@ -4748,6 +4808,26 @@ void Platform::Tick()
 	}
 
 	AnalogInStartConversion();
+}
+
+ODrive& Platform::GetWriteableODrive(size_t axis)
+{
+	return const_cast<ODrive&>(GetODrive(axis));
+}
+
+const ODrive& Platform::GetODrive(size_t axis)
+{
+	if (odrive0.AxisToODriveAxis(axis) != NO_AXIS)
+	{
+		// If both ODrives have axis mapped to M0 or M1
+		// then odrive0 is returned
+		return odrive0;
+	}
+	if (odrive1.AxisToODriveAxis(axis) != NO_AXIS)
+	{
+		return odrive1;
+	}
+	return odrive0; // TODO: error handling...
 }
 
 // Pragma pop_options is not supported on this platform

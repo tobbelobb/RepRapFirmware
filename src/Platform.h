@@ -43,6 +43,7 @@ Licence: GPL
 #include "ZProbe.h"
 #include "ZProbeProgrammer.h"
 #include <General/IPAddress.h>
+#include "ODrive.h"
 
 #if defined(DUET_NG)
 # include "DueXn.h"
@@ -298,9 +299,9 @@ class Platform
 public:
 	// Enumeration to describe the status of a drive
 	enum class DriverStatus : uint8_t { disabled, idle, enabled };
-  
+
 	Platform();
-  
+
 //-------------------------------------------------------------------------------------------------------------
 
 	// These are the functions that form the interface between Platform and the rest of the firmware.
@@ -394,8 +395,12 @@ public:
 	void SetDirection(size_t axisOrExtruder, bool direction);
 	void SetDirectionValue(size_t driver, bool dVal);
 	bool GetDirectionValue(size_t driver) const;
+	void SetInvertReportedAngle(size_t drive, bool dVal);
+	bool GetInvertReportedAngle(size_t drive) const;
 	void SetEnableValue(size_t driver, int8_t eVal);
 	bool GetEnableValue(size_t driver) const;
+	void SetExternalI2C(size_t driver, uint8_t addr);
+	uint8_t GetExternalI2c(size_t driver) const;
 	void EnableDriver(size_t driver);
 	void DisableDriver(size_t driver);
 	void EnableDrive(size_t axisOrExtruder);
@@ -533,6 +538,10 @@ public:
 	// So you can test for inkjet presence with if(platform->Inkjet(0))
 	bool Inkjet(int bitPattern);
 
+	// Register the used i2c addresses to avoid double use...
+	size_t RegisterI2cAddrUsage(uint8_t addr);
+	size_t UnregisterI2cAddrUsage(uint8_t addr);
+
 	// MCU temperature
 #if HAS_CPU_TEMP_SENSOR
 	void GetMcuTemperatures(float& minT, float& currT, float& maxT) const;
@@ -556,6 +565,12 @@ public:
 	void DriverCoolingFansOnOff(uint32_t driverChannelsMonitored, bool on);
 	unsigned int GetNumSmartDrivers() const { return numSmartDrivers; }
 #endif
+
+	// TODO: if HAS_ODRIVES
+	ODrive& GetWriteableODrive0() { return odrive0; }; // Use when you tell RRF which Duet pins are physically connected to which ODrive pins
+	ODrive& GetWriteableODrive1() { return odrive1; }; // ditto
+	ODrive& GetWriteableODrive(size_t axis); // Use when saving ODrive state inside RRF
+	const ODrive& GetODrive(size_t axis); // Prefer this for all other ODrive uses
 
 #if HAS_STALL_DETECT
 	GCodeResult ConfigureStallDetection(GCodeBuffer& gb, const StringRef& reply, OutputBuffer *& buf);
@@ -604,7 +619,7 @@ public:
 	static uint8_t softwareResetDebugInfo;				// extra info for debugging
 
 	//-------------------------------------------------------------------------------------------------------
-  
+
 private:
 	Platform(const Platform&);						// private copy constructor to make sure we don't try to copy a Platform
 
@@ -677,6 +692,10 @@ private:
 	static_assert(SoftwareResetData::numberOfSlots * sizeof(SoftwareResetData) <= FLASH_DATA_LENGTH, "NVData too large");
 #endif
 
+	// TODO: if HAS_ODRIVES
+	ODrive odrive0{0,1};
+	ODrive odrive1{2,3};
+
 	// Logging
 	Logger *logger;
 
@@ -718,7 +737,16 @@ private:
 
 	volatile DriverStatus driverState[MaxTotalDrivers];
 	bool directions[MaxTotalDrivers];
+	bool invertReportedAngle[MaxTotalDrivers];
 	int8_t enableValues[MaxTotalDrivers];
+	/* Non-zero i2c-value in interpreted as an i2c address.
+	 * Some gcodes will be forwarded to the i2c address.
+	 * Value 0 means: "There's no i2c connected to this drive, don't forward via i2c".
+	 * This works since i2c address 0 is reserved for the i2c bus master (this firmware will act as master). */
+	uint8_t i2cValues[MaxTotalDrivers];
+	// Keep track of used i2c addresses, so we can warn if one is unintentionally used twice
+	static const size_t MAX_TRACK_I2C_ADDRS = 50;
+	uint8_t registeredAddrs[MAX_TRACK_I2C_ADDRS] = { 0 };
 	Pin endStopPins[NumEndstops];
 	float maxFeedrates[MaxTotalDrivers];
 	float accelerations[MaxTotalDrivers];
@@ -833,7 +861,7 @@ private:
 
 	// Files
 	MassStorage* massStorage;
-  
+
 	// Data used by the tick interrupt handler
 
 	// Heater #n, 0 <= n < HEATERS, uses "temperature channel" tc given by
@@ -1016,6 +1044,18 @@ inline bool Platform::GetDirectionValue(size_t drive) const
 	return directions[drive];
 }
 
+// When we ask for the angle of this drive (eg communicating with encoder via i2c),
+// shold we invert the angle it gives us before using it?
+inline void Platform::SetInvertReportedAngle(size_t drive, bool dVal)
+{
+	invertReportedAngle[drive] = dVal;
+}
+
+inline bool Platform::GetInvertReportedAngle(size_t drive) const
+{
+	return invertReportedAngle[drive];
+}
+
 inline void Platform::SetDriverDirection(uint8_t driver, bool direction)
 {
 	if (driver < NumDirectDrivers)
@@ -1028,6 +1068,11 @@ inline void Platform::SetDriverDirection(uint8_t driver, bool direction)
 inline bool Platform::GetEnableValue(size_t driver) const
 {
 	return enableValues[driver];
+}
+
+inline uint8_t Platform::GetExternalI2c(size_t driver) const
+{
+	return i2cValues[driver];
 }
 
 inline float Platform::AxisMaximum(size_t axis) const

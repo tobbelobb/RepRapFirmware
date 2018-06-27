@@ -64,6 +64,13 @@ struct Trigger
 	}
 };
 
+// Facilitates sending of floats over i2c
+// Contains the assumtion that floats are 4 bytes long
+typedef union {
+  float fval;
+  uint8_t bval[4];
+} I2cFloat;
+
 // Bits for T-code P-parameter to specify which macros are supposed to be run
 constexpr uint8_t TFreeBit = 1 << 0;
 constexpr uint8_t TPreBit = 1 << 1;
@@ -130,6 +137,7 @@ public:
 		uint8_t hasExtrusion : 1;										// true if the move includes extrusion - only valid if the move was set up by SetupMove
 		uint8_t isCoordinated : 1;										// true if this is a coordinates move
 		uint8_t usingStandardFeedrate : 1;								// true if this move uses the standard feed rate
+		uint8_t alterPositionState : 1;									// true if this move should alter the variables describing position state
 	};
 
 	GCodes(Platform& p);
@@ -142,6 +150,10 @@ public:
 	bool QueueFileToPrint(const char* fileName, const StringRef& reply);	// Open a file of G Codes to run
 	void StartPrinting(bool fromStart);									// Start printing the file already selected
 	void GetCurrentCoordinates(const StringRef& s) const;				// Write where we are into a string
+	GCodeResult GetAxisPositionsFromEncodersI2C(const StringRef& reply);// Get encoder position since G96, calculate moved mm, and write to string
+	void GetEncoderPositionsUART(const StringRef& reply);				// Get encoder position since G96, convert units to degrees, and write to string
+	int ConnectODriveToSerialChannel(size_t whichODrive, size_t whichChannel, uint32_t atWhatBaud, const StringRef& reply);
+	float I2cRequestFloat(uint8_t addr);						 		// Send only the name of the gcode, ask for a float back
 	bool DoingFileMacro() const;										// Or still busy processing a macro file?
 	float FractionOfFilePrinted() const;								// Get fraction of file printed
 	FilePosition GetFilePosition() const;								// Return the current position of the file being printed in bytes
@@ -210,7 +222,9 @@ public:
 	bool ReHomeOnStall(DriversBitmap stalledDrivers);
 #endif
 
-	const char *GetAxisLetters() const { return axisLetters; }			// Return a null-terminated string of axis letters indexed by drive
+	const char *GetAxisLetters() const { return axisLetters; }					// Return a null-terminated string of axis letters indexed by drive
+	const char *GetMachineAxisLetters() const { return machineAxisLetters; }	// Return a null-terminated string of axis letters indexed by drive
+	void SetMachineAxisLetters(const char *letters, uint8_t n);					// Set names of the n machine axes
 	MachineType GetMachineType() const { return machineType; }
 
 #if SUPPORT_12864_LCD
@@ -291,6 +305,10 @@ private:
 	GCodeResult SetPrintZProbe(GCodeBuffer& gb, const StringRef& reply);		// Either return the probe value, or set its threshold
 	GCodeResult SetOrReportOffsets(GCodeBuffer& gb, const StringRef& reply);	// Deal with a G10
 	GCodeResult SetPositions(GCodeBuffer& gb);									// Deal with a G92
+	GCodeResult I2cForward(const GCodeBuffer & gb, const uint8_t addr, const uint8_t *data, const size_t dataSize, const StringRef& reply);
+	GCodeResult I2cForward(const GCodeBuffer& gb, const uint8_t addr, const StringRef& reply);	// Forward gcodes. Used for drivers with a i2c address set in i2cValues.
+	GCodeResult SetTorqueMode(GCodeBuffer& gb, const StringRef& reply);			// Deal with a G95
+	GCodeResult MarkEncoderRef(GCodeBuffer& gb, const StringRef& reply);		// Deal with a G96
 	GCodeResult DoDriveMapping(GCodeBuffer& gb, const StringRef& reply);		// Deal with a M584
 	GCodeResult ProbeTool(GCodeBuffer& gb, const StringRef& reply);				// Deal with a M585
 	GCodeResult SetDateTime(GCodeBuffer& gb,const  StringRef& reply);			// Deal with a M905
@@ -508,6 +526,7 @@ private:
 	FilePosition fileOffsetToPrint;				// The offset to print from
 
 	char axisLetters[MaxAxes + 1];				// The names of the axes, with a null terminator
+	char machineAxisLetters[MaxAxes + 1];		// Names of the machine's axes, with a null terminator.
 	bool limitAxes;								// Don't think outside the box
 	bool noMovesBeforeHoming;					// Don't allow movement prior to homing the associates axes
 

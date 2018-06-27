@@ -30,6 +30,7 @@ public:
 	void GetAssumedInitialPosition(size_t numAxes, float positions[]) const override;
 	size_t NumHomingButtons(size_t numVisibleAxes) const override { return 0; }
 	const char* HomingButtonNames() const override { return "ABCD"; }
+	const char* MachineAxisNames() const override { return "ABCD"; }
 	HomingMode GetHomingMode() const override { return homeIndividualMotors; }
 	AxesBitmap AxesAssumedHomed(AxesBitmap g92Axes) const override;
 	AxesBitmap MustBeHomedAxes(AxesBitmap axesMoving, bool disallowMovesBeforeHoming) const override;
@@ -38,8 +39,11 @@ public:
 	void OnHomingSwitchTriggered(size_t axis, bool highEnd, const float stepsPerMm[], DDA& dda) const override;
 	bool WriteResumeSettings(FileStore *f) const override;
 	void LimitSpeedAndAcceleration(DDA& dda, const float *normalisedDirectionVector) const override;
+	float MotorAngToAxisPosition(float ang, uint32_t fullStepsPerRevolution, const float stepsPerMm[], size_t axis) override;
+	uint32_t GetFullStepsPerMotorRev(size_t axis) override;
 
 private:
+	float MotorPosToLinePos(const int32_t motorPos, size_t axis) const;
 	static constexpr float DefaultSegmentsPerSecond = 100.0;
 	static constexpr float DefaultMinSegmentSize = 0.2;
 
@@ -62,8 +66,14 @@ private:
 	float anchorA[3], anchorB[3], anchorC[3];				// XYZ coordinates of the anchors
 	float anchorDz;
 	float printRadius;
+	// Line buildup compensation
+	float spoolBuildupFactor;
+	float spoolRadii[HANGPRINTER_AXES];
+	uint32_t mechanicalAdvantage[HANGPRINTER_AXES], linesPerSpool[HANGPRINTER_AXES];
+	uint32_t motorGearTeeth[HANGPRINTER_AXES], spoolGearTeeth[HANGPRINTER_AXES], fullStepsPerMotorRev[HANGPRINTER_AXES];
 
 	// Derived parameters
+	float k0[HANGPRINTER_AXES], spoolRadiiSq[HANGPRINTER_AXES], k2[HANGPRINTER_AXES], lineLengthsOrigin[HANGPRINTER_AXES];
 	float printRadiusSquared;
 	float Da2, Db2, Dc2;
 	float Xab, Xbc, Xca;

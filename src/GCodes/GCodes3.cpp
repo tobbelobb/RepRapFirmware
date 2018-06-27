@@ -15,6 +15,8 @@
 #include "Tools/Tool.h"
 #include "PrintMonitor.h"
 #include "Tasks.h"
+#include "SharedSpi.h"
+#include "usart/usart.h"
 
 #if HAS_WIFI_NETWORKING
 # include "FirmwareUpdater.h"
@@ -29,6 +31,10 @@
 #if SUPPORT_TMC51xx
 # include "Movement/StepperDrivers/TMC51xx.h"
 #endif
+
+#include "ODrive.h"
+
+#include <algorithm> // for std::copy_n
 
 #include "Wire.h"
 
@@ -187,6 +193,293 @@ GCodeResult GCodes::SetPositions(GCodeBuffer& gb)
 #endif
 	}
 
+	return GCodeResult::ok;
+}
+
+// Sends the gcode and the value to the i2c addr
+GCodeResult GCodes::I2cForward(const GCodeBuffer & gb, const uint8_t addr, const uint8_t *data, const size_t dataSize, const StringRef& reply)
+{
+	const char *buffer = gb.Buffer();
+
+	// How many letters before first space in gcode command? Lets us different length commands
+	// We do rely on string termination being done right in gcodeBuffer...
+	size_t glen = 0;
+	if (buffer[1] == ' ' || buffer[1] == '\0') glen = 1;
+	else if (buffer[2] == ' ' || buffer[2] == '\0') glen = 2;
+	else if (buffer[3] == ' ' || buffer[3] == '\0') glen = 3;
+	else if (buffer[4] == ' ' || buffer[4] == '\0') glen = 4;
+
+	uint8_t send[MaxI2cBytes] = { '\0' };
+  for(size_t i = 0; i < glen; i++)
+  {
+    send[i] = (uint8_t)buffer[i];
+  }
+
+  send[glen] = (uint8_t)' '; // space to separate gcode and data
+
+  for(size_t i = 0; i < dataSize; i++)
+  {
+    send[i + glen + 1] = data[i];
+  }
+
+  size_t numToSend = glen + 1 + dataSize;
+	platform.InitI2c();
+  size_t bytesSent = 0;
+  {
+    MutexLocker lock(Tasks::GetI2CMutex());
+    bytesSent = I2C_IFACE.Transfer((int)addr, send, numToSend, 0);
+  }
+
+	if (bytesSent != numToSend)
+	{
+		reply.copy("I2C transmission error");
+		return GCodeResult::error;
+	}
+
+	reply.printf("Sent %d bytes to i2c addr 0x%02x", bytesSent, addr);
+
+	return GCodeResult::ok;
+}
+
+GCodeResult GCodes::I2cForward(const GCodeBuffer& gb, const uint8_t addr, const StringRef& reply)
+{
+	constexpr uint8_t *dummydata = nullptr;
+	return I2cForward(gb, addr, dummydata, 0, reply);
+}
+
+float GCodes::I2cRequestFloat(uint8_t addr)
+{
+	I2cFloat r;
+	platform.InitI2c();
+	size_t bytesReceived = 0;
+	{
+		MutexLocker lock(Tasks::GetI2CMutex());
+		bytesReceived = I2C_IFACE.Transfer((uint16_t)addr, r.bval, 0, sizeof(r.fval));
+	}
+
+	if (bytesReceived != sizeof(r.fval))
+	{
+		return nanf("");
+	}
+	return r.fval;
+}
+
+// This handles M569 Q
+int GCodes::ConnectODriveToSerialChannel(size_t whichODrive, size_t whichChannel, uint32_t atWhatBaud, const StringRef& reply)
+{
+	if (whichODrive > 1)
+	{
+		reply.printf("ODrive number %u doesn't exist.", whichODrive);
+		return 1;
+	}
+	ODrive& odrv = (whichODrive == 0)
+		? reprap.GetPlatform().GetWriteableODrive0()
+		: reprap.GetPlatform().GetWriteableODrive1();
+
+	switch (whichChannel)
+	{
+		#if defined(SERIAL_AUX_DEVICE)
+		case 1:
+		    reprap.GetPlatform().SetBaudRate(whichChannel, atWhatBaud);
+			odrv.SetSerial(&SERIAL_AUX_DEVICE);
+			odrv.flush(); // TODO: Don't know if this is enough
+			return 0;
+		#endif
+		#if defined(SERIAL_AUX2_DEVICE)
+		case 2:
+			reprap.GetPlatform().SetBaudRate(whichChannel, atWhatBaud);
+			odrv.SetSerial(&SERIAL_AUX2_DEVICE);
+			return 0;
+		#endif
+		#if defined(SERIAL_STOLEN_DEVICE)
+		case 99:  // 99 Is the special steal-the-shared-spi serial channel
+			if (signalThatSspiPinsAreUsedForUart() == 0)
+			{
+				ConfigurePin(g_APinDescription[APIN_USART_SSPI_MOSI]);
+				ConfigurePin(g_APinDescription[APIN_USART_SSPI_MISO]);
+				SERIAL_STOLEN_DEVICE.begin(atWhatBaud); // Something is done in this begin that breaks serial upon uploadning and flashing new firmware
+				SERIAL_STOLEN_DEVICE.setInterruptPriority(NvicPriorityPanelDueUart);
+				odrv.SetSerial(&SERIAL_STOLEN_DEVICE);
+				return 0;
+			}
+			else
+			{
+				return 1;
+			}
+		#endif // defined(SERIAL_STOLEN_DEVICE)
+		default:
+			reply.printf("Channel %u is not available.", whichChannel);
+	}
+    return 1;
+}
+
+
+// This handles M114 S2
+void GCodes::GetEncoderPositionsUART(const StringRef& reply)
+{
+
+	float posCount[4] = { 0.0, 0.0, 0.0, 0.0 }; // motor shaft angular position in units of radians
+	float angDeg[4] = { 0.0, 0.0, 0.0, 0.0 };
+
+	reply.copy("[");
+	for (size_t axis = 0; axis < numVisibleAxes; ++axis)
+	{
+		const ODrive& odrv = reprap.GetPlatform().GetODrive(axis);
+		const ODriveAxis odrvAxis = odrv.AxisToODriveAxis(axis);
+		posCount[axis] = odrv.AskForEncoderPosEstimate(odrvAxis) - odrv.GetEncoderPosReference(odrvAxis);
+		angDeg[axis] = 180.0*posCount[axis]/Pi;
+
+		// Correct sign
+		if (!platform.GetDirectionValue(platform.GetAxisDriversConfig(axis).driverNumbers[0]))
+		{
+			angDeg[axis] *= -1.0;
+		}
+
+		reply.catf("%.2f, ", (double)angDeg[axis]);
+	}
+	reply.cat(" ],\n");
+}
+
+
+// This handles M114 S1
+GCodeResult GCodes::GetAxisPositionsFromEncodersI2C(const StringRef& reply)
+{
+	reply.copy("[");
+	for (size_t axis = 0; axis < numVisibleAxes; ++axis)
+	{
+		const AxisDriversConfig& axisConfig = platform.GetAxisDriversConfig(axis);
+		const uint8_t driver = axisConfig.driverNumbers[0]; // Only supports single driver
+		const uint8_t i2cAddr = platform.GetExternalI2c(driver);
+		if (i2cAddr)
+		{
+			float ang = I2cRequestFloat(i2cAddr);
+			if(ang == nanf(""))
+			{
+				reply.cat("I2C transmission error\n");
+				return GCodeResult::error;
+			}
+			if(platform.GetInvertReportedAngle(driver) == platform.GetDirectionValue(driver))
+			{
+				ang = -ang;
+			}
+			uint32_t stPrRev = reprap.GetMove().GetKinematics().GetFullStepsPerMotorRev(axis);
+			float pos = reprap.GetMove().GetKinematics().MotorAngToAxisPosition(ang, stPrRev, reprap.GetPlatform().GetDriveStepsPerUnit(), axis);
+			reply.catf("%.2f", (double)pos);
+		}
+		if (axis < numVisibleAxes - 1)
+		{
+			reply.cat(", ");
+		}
+	}
+	reply.cat(" ],\n");
+	return GCodeResult::ok;
+}
+
+// This handles G95
+GCodeResult GCodes::SetTorqueMode(GCodeBuffer& gb, const StringRef& reply)
+{
+	GCodeResult res = GCodeResult::ok;
+	constexpr float maxTorque = 127.0f; // TODO: This is part of protocol that RRF, Marlin, Mechaduino Firmware, and Smart Stepper Firmware must agree on
+										// Putting that directly into this function is a bit fragile.
+
+	for (size_t axis = 0; axis < numVisibleAxes; ++axis)
+	{
+		if (gb.Seen(machineAxisLetters[axis]))
+		{
+			const AxisDriversConfig& axisConfig = platform.GetAxisDriversConfig(axis);
+			const uint8_t driver = axisConfig.driverNumbers[0]; // Only supports single driver
+			const uint8_t i2cAddr = platform.GetExternalI2c(driver);
+			if (i2cAddr)
+			{
+				I2cFloat torque;
+				torque.fval = gb.GetFValue();
+				if (fabs(torque.fval) < maxTorque)
+				{
+					torque.fval = fabs(torque.fval); // We want G95 to always drive axis backwards, never forwards
+					if (platform.GetDirectionValue(driver))
+					{
+						torque.fval = -torque.fval;
+					}
+					if ((res = I2cForward(gb, i2cAddr, torque.bval, 4, reply)) != GCodeResult::ok)
+					{
+						return res;
+					}
+				}
+			}
+			else
+			{
+				// Enable torque mode on UART connected ODrives
+				const ODrive& odrv = reprap.GetPlatform().GetODrive(axis);
+				ODriveAxis odrvAxis = odrv.AxisToODriveAxis(axis);
+				float torque = gb.GetFValue();
+				if (fabs(torque) < 0.1)
+				{
+					// Special behaviour if ~0 torque requested: return to pos mode
+					odrv.SetCurrent(odrvAxis, 0.0);
+					const float desiredPos = odrv.AskForEncoderPosEstimate(odrvAxis);
+					odrv.SetPosSetpoint(odrvAxis, desiredPos);
+					odrv.EnablePositionControlMode(odrvAxis);
+					reply.printf("Set axis %d to position mode\n", odrvAxis);
+				}
+				else if (fabs(torque) < maxTorque)
+				{
+					// Calculate the right current, including its sign
+					torque = fabs(torque);
+					if (platform.GetDirectionValue(driver)) torque = -torque;
+					constexpr float maxCurrentA = 30.0f;
+					// Limit max current. Use units that max out at maxTorque to match Mechaduino and Smart Stepper behaviour.
+					const float currentA = (torque/maxTorque)*maxCurrentA;
+					odrv.SetCurrent(odrvAxis, currentA);
+					reply.printf("Axis %d torque: %.3f/%.3f. (%.3f A)\n", axis, (double)torque, (double)maxTorque, (double)currentA);
+				}
+			}
+		}
+	}
+
+	// TODO: support for gb.Seen(extrudeLetter)
+	return GCodeResult::ok;
+}
+
+// This handles G96
+GCodeResult GCodes::MarkEncoderRef(GCodeBuffer& gb, const StringRef& reply)
+{
+	GCodeResult res = GCodeResult::ok;
+	// Make "G96" a shorthand for "G96 A B C D" or "G96 X Y Z"
+	bool noneSeen = true;
+	for (size_t axis = 0; axis < numVisibleAxes; ++axis)
+	{
+		if (gb.Seen(machineAxisLetters[axis]))
+		{
+			noneSeen = false;
+			break;
+		}
+	}
+
+	for (size_t axis = 0; axis < numVisibleAxes; ++axis)
+	{
+		if (gb.Seen(machineAxisLetters[axis]) || noneSeen)
+		{
+			const AxisDriversConfig& axisConfig = platform.GetAxisDriversConfig(axis);
+			const uint8_t driver = axisConfig.driverNumbers[0]; // Only supports single driver
+			const uint8_t i2cAddr = platform.GetExternalI2c(driver);
+			if (i2cAddr)
+			{
+				if ((res = I2cForward(gb, i2cAddr, reply)) != GCodeResult::ok) return res;
+			}
+			else
+			{
+				// Mark encoder reference point on UART connected ODrives
+				ODrive& odrv = reprap.GetPlatform().GetWriteableODrive(axis);
+				reply.catf("axis: %d, ODrive axis map {%d, %d}, ", axis, odrv.GetAxisMap(M0), odrv.GetAxisMap(M1));
+				ODriveAxis odrvAxis = odrv.AxisToODriveAxis(axis);
+				odrv.StoreEncoderPosReference(odrvAxis);
+				reply.catf("Set odrv.encoderPosReference[%d] to %.3f\n",
+						odrvAxis, (double)odrv.GetEncoderPosReference(odrvAxis));
+			}
+		}
+	}
+
+	// TODO: support for gb.Seen(extrudeLetter)
 	return GCodeResult::ok;
 }
 
@@ -710,7 +1003,7 @@ GCodeResult GCodes::DoDriveMapping(GCodeBuffer& gb, const StringRef& reply)
 	}
 
 	bool seen = false;
-	const char *lettersToTry = "XYZUVWABC";
+	const char *lettersToTry = "XYZUVWABCD";
 	char c;
 	while ((c = *lettersToTry) != 0)
 	{
@@ -731,13 +1024,13 @@ GCodeResult GCodes::DoDriveMapping(GCodeBuffer& gb, const StringRef& reply)
 
 			// Find the drive number allocated to this axis, or allocate a new one if necessary
 			size_t drive = 0;
-			while (drive < numTotalAxes && axisLetters[drive] != c)
+			while (drive < numTotalAxes && machineAxisLetters[drive] != c)
 			{
 				++drive;
 			}
 			if (drive == numTotalAxes && drive < MaxAxes)
 			{
-				axisLetters[drive] = c;								// assign the drive to this drive letter
+				machineAxisLetters[drive] = c;								// assign the drive to this drive letter
 				++numTotalAxes;
 				numVisibleAxes = numTotalAxes;						// assume any new axes are visible unless there is a P parameter
 				float initialCoords[MaxAxes];
@@ -796,7 +1089,7 @@ GCodeResult GCodes::DoDriveMapping(GCodeBuffer& gb, const StringRef& reply)
 		{
 			reply.cat(' ');
 			const AxisDriversConfig& axisConfig = platform.GetAxisDriversConfig(drive);
-			char c = axisLetters[drive];
+			char c = machineAxisLetters[drive];
 			for (size_t i = 0; i < axisConfig.numDrivers; ++i)
 			{
 				reply.catf("%c%u", c, axisConfig.driverNumbers[i]);
@@ -1145,8 +1438,29 @@ GCodeResult GCodes::ReceiveI2c(GCodeBuffer& gb, const StringRef &reply)
 }
 
 // Deal with M569
-GCodeResult GCodes::ConfigureDriver(GCodeBuffer& gb,const  StringRef& reply)
+GCodeResult GCodes::ConfigureDriver(GCodeBuffer& gb, const StringRef& reply)
 {
+	uint32_t qvals[3];
+	bool seenQ = false;
+	gb.TryGetUIArray('Q', 3, qvals, reply, seenQ);
+	if (seenQ)
+	{
+		reply.printf("Connecting ODrive %u to serial %u at %lu baud...", (size_t)qvals[0], (size_t)qvals[1], qvals[2]);
+		if (ConnectODriveToSerialChannel((size_t)qvals[0], (size_t)qvals[1], qvals[2], reply) == 0)
+		{
+			if (qvals[1] == 2)
+			{
+				reply.catf("Setting baud of serial %u is not yet implemented. Hard coded value 115200 will be used.", (size_t)qvals[1]);
+			}
+			reply.cat("Success.");
+			// TODO: Also associate ODrive qvals[0] with drive from P-parmeter
+		}
+		else
+		{
+			reply.cat("Failure.");
+		}
+	}
+
 	if (gb.Seen('P'))
 	{
 		const size_t drive = gb.GetIValue();
@@ -1171,6 +1485,11 @@ GCodeResult GCodes::ConfigureDriver(GCodeBuffer& gb,const  StringRef& reply)
 				seen = true;
 				platform.SetEnableValue(drive, (int8_t)gb.GetIValue());
 			}
+			if (gb.Seen('M'))
+			{
+				seen = true;
+				platform.SetInvertReportedAngle(drive, (int8_t)gb.GetIValue());
+			}
 			if (gb.Seen('T'))
 			{
 				seen = true;
@@ -1183,6 +1502,23 @@ GCodeResult GCodes::ConfigureDriver(GCodeBuffer& gb,const  StringRef& reply)
 					return GCodeResult::error;
 				}
 				platform.SetDriverStepTiming(drive, timings);
+			}
+			if (gb.Seen('I'))
+			{
+				seen = true;
+#if defined(I2C_IFACE)
+				// This drive's previous i2c addr will no longer be used
+				platform.UnregisterI2cAddrUsage(platform.GetExternalI2c(drive));
+				uint8_t addr = (uint8_t)gb.GetUIValueMaybeHex();
+				size_t n = platform.RegisterI2cAddrUsage(addr); // Broadcast that there's a new listener on addr
+				if (n > 1)
+				{
+					reply.printf("Warning, there are now %d registered recipiens on the i2c address 0x%02x", n, addr);
+				}
+				platform.SetExternalI2C(drive, addr);
+#else
+				reply.copy("Skipping I, I2C not available");
+#endif
 			}
 
 #if HAS_SMART_DRIVERS
@@ -1279,10 +1615,11 @@ GCodeResult GCodes::ConfigureDriver(GCodeBuffer& gb,const  StringRef& reply)
 #endif
 			if (!seen)
 			{
-				reply.printf("Drive %u runs %s, active %s enable, step timing ",
+				reply.printf("Drive %u runs %s, active %s enable, i2c value 0x%02x, step timing ",
 							drive,
 							(platform.GetDirectionValue(drive)) ? "forwards" : "in reverse",
-							(platform.GetEnableValue(drive)) ? "high" : "low");
+							(platform.GetEnableValue(drive)) ? "high" : "low",
+                            platform.GetExternalI2c(drive));
 							float timings[4];
 							const bool isSlowDriver = platform.GetDriverStepTiming(drive, timings);
 							if (isSlowDriver)

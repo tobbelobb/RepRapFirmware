@@ -334,6 +334,14 @@ bool GCodes::HandleGcode(GCodeBuffer& gb, const StringRef& reply)
 		result = SetPositions(gb);
 		break;
 
+	case 95: // Set/toggle torque mode
+		result = SetTorqueMode(gb, reply);
+		break;
+
+	case 96: // Mark encoder reference point
+		result = MarkEncoderRef(gb, reply);
+		break;
+
 	default:
 		result = GCodeResult::notSupported;
 	}
@@ -1126,7 +1134,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 			bool seen = false;
 			for (size_t axis = 0; axis < numTotalAxes; axis++)
 			{
-				if (gb.Seen(axisLetters[axis]))
+				if (gb.Seen(machineAxisLetters[axis]))
 				{
 					if (!LockMovementAndWaitForStandstill(gb))
 					{
@@ -1165,7 +1173,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 				reply.copy("Steps/mm: ");
 				for (size_t axis = 0; axis < numTotalAxes; ++axis)
 				{
-					reply.catf("%c: %.3f, ", axisLetters[axis], (double)platform.DriveStepsPerUnit(axis));
+					reply.catf("%c: %.3f, ", machineAxisLetters[axis], (double)platform.DriveStepsPerUnit(axis));
 				}
 				reply.catf("E:");
 				char sep = ' ';
@@ -1405,7 +1413,22 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 		break;
 
 	case 114:
-		GetCurrentCoordinates(reply);
+		if (gb.Seen('S'))
+		{
+			int ival = gb.GetIValue();
+			if (ival == 1)
+			{
+				GetAxisPositionsFromEncodersI2C(reply);
+			}
+			else if (ival == 2)
+			{
+				GetEncoderPositionsUART(reply);
+			}
+		}
+		else
+		{
+			GetCurrentCoordinates(reply);
+		}
 		break;
 
 	case 115: // Print firmware version or set hardware type
@@ -2010,7 +2033,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 				char sep = 's';
 				for (size_t axis = 0; axis < numTotalAxes; axis++)
 				{
-					reply.catf("%c %c%.1f:%.1f", sep, axisLetters[axis], (double)platform.AxisMinimum(axis), (double)platform.AxisMaximum(axis));
+					reply.catf("%c %c%.1f:%.1f", sep, machineAxisLetters[axis], (double)platform.AxisMinimum(axis), (double)platform.AxisMaximum(axis));
 					sep = ',';
 				}
 			}
@@ -2367,7 +2390,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 			bool seen = false;
 			for (size_t axis = 0; axis < numTotalAxes; axis++)
 			{
-				if (gb.Seen(axisLetters[axis]))
+				if (gb.Seen(machineAxisLetters[axis]))
 				{
 					if (!LockMovementAndWaitForStandstill(gb))
 					{
@@ -2381,7 +2404,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 					}
 					else
 					{
-						reply.printf("Drive %c does not support %ux microstepping%s", axisLetters[axis], microsteps, ((interp) ? " with interpolation" : ""));
+						reply.printf("Drive %c does not support %ux microstepping%s", machineAxisLetters[axis], microsteps, ((interp) ? " with interpolation" : ""));
 						result = GCodeResult::error;
 					}
 				}
@@ -2414,7 +2437,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 				{
 					bool actualInterp;
 					const unsigned int microsteps = platform.GetMicrostepping(axis, actualInterp);
-					reply.catf("%c:%u%s, ", axisLetters[axis], microsteps, (actualInterp) ? "(on)" : "");
+					reply.catf("%c:%u%s, ", machineAxisLetters[axis], microsteps, (actualInterp) ? "(on)" : "");
 				}
 				reply.cat("E");
 				for (size_t extruder = 0; extruder < numExtruders; extruder++)
@@ -3056,7 +3079,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 			bool seen = false;
 			for (size_t axis = 0; axis < numTotalAxes; axis++)
 			{
-				if (gb.Seen(axisLetters[axis]))
+				if (gb.Seen(machineAxisLetters[axis]))
 				{
 					platform.SetInstantDv(axis, gb.GetFValue() * multiplier);
 					seen = true;
@@ -3079,7 +3102,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 				reply.copy("Maximum jerk rates: ");
 				for (size_t axis = 0; axis < numTotalAxes; ++axis)
 				{
-					reply.catf("%c: %.1f, ", axisLetters[axis], (double)(platform.GetInstantDv(axis) / multiplier));
+					reply.catf("%c: %.1f, ", machineAxisLetters[axis], (double)(platform.GetInstantDv(axis) / multiplier));
 				}
 				reply.cat("E:");
 				char sep = ' ';
@@ -3955,7 +3978,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 			bool seen = false;
 			for (size_t axis = 0; axis < numTotalAxes; axis++)
 			{
-				if (gb.Seen(axisLetters[axis]))
+				if (gb.Seen(machineAxisLetters[axis]))
 				{
 					platform.SetMotorCurrent(axis, gb.GetFValue(), code);
 					seen = true;
@@ -3990,7 +4013,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 						);
 				for (size_t axis = 0; axis < numTotalAxes; ++axis)
 				{
-					reply.catf("%c:%d, ", axisLetters[axis], (int)platform.GetMotorCurrent(axis, code));
+					reply.catf("%c:%d, ", machineAxisLetters[axis], (int)platform.GetMotorCurrent(axis, code));
 				}
 				reply.cat("E");
 				for (size_t extruder = 0; extruder < numExtruders; extruder++)
@@ -4124,6 +4147,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 
 #if SUPPORT_12864_LCD
 	case 918: // Configure direct-connect display
+		reprap.SpinDisplay();
 		result = reprap.GetDisplay().Configure(gb, reply);
 		break;
 #endif

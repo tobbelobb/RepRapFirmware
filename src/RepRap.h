@@ -72,6 +72,9 @@ public:
 	void SetPassword(const char* pw);
 
 	void AddTool(Tool* t);
+#if SUPPORT_12864_LCD
+	void SpinDisplay() const;
+#endif
 	void DeleteTool(Tool* t);
 	void SelectTool(int toolNumber, bool simulating);
 	void StandbyTool(int toolNumber, bool simulating);
@@ -166,6 +169,7 @@ private:
 
 #if SUPPORT_12864_LCD
  	Display *display;
+	bool displaySpins = false;
 #endif
 
  	Mutex toolListMutex, messageBoxMutex;

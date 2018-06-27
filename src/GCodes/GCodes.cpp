@@ -92,12 +92,14 @@ GCodes::GCodes(Platform& p) :
 #else
 	httpGCode = telnetGCode = nullptr;
 #endif
-#ifdef SERIAL_AUX_DEVICE
-	auxInput = new StreamGCodeInput(SERIAL_AUX_DEVICE);
-	auxGCode = new GCodeBuffer("aux", LcdMessage, false);
-#else
+// TODO: ODrive wants SERIAL_AUX_DEVICE for itself.
+//  Make Panel Due and ODrive live side by side later
+//#ifdef SERIAL_AUX_DEVICE
+//	auxInput = new StreamGCodeInput(SERIAL_AUX_DEVICE);
+//	auxGCode = new GCodeBuffer("aux", LcdMessage, false);
+//#else
 	auxGCode = nullptr;
-#endif
+//#endif
 	daemonGCode = new GCodeBuffer("daemon", GenericMessage, false);
 #if SUPPORT_12864_LCD
 	lcdGCode = new GCodeBuffer("lcd", GenericMessage, false);
@@ -121,6 +123,10 @@ void GCodes::Init()
 	axisLetters[0] = 'X';
 	axisLetters[1] = 'Y';
 	axisLetters[2] = 'Z';
+	memset(machineAxisLetters, 0, sizeof(machineAxisLetters));
+	machineAxisLetters[0] = 'X';
+	machineAxisLetters[1] = 'Y';
+	machineAxisLetters[2] = 'Z';
 
 #if HAS_SMART_DRIVERS
 	numExtruders = min<size_t>(MaxExtruders, platform.GetNumSmartDrivers() - XYZ_AXES);	// don't default dumb drivers to extruders because they don't support the same microstepping options
@@ -173,6 +179,9 @@ void GCodes::Init()
 
 #ifdef SERIAL_AUX_DEVICE
 	SERIAL_AUX_DEVICE.SetInterruptCallback(GCodes::CommandEmergencyStop);
+#endif
+#ifdef SERIAL_STOLEN_DEVICE
+	SERIAL_STOLEN_DEVICE.SetInterruptCallback(GCodes::CommandEmergencyStop);
 #endif
 }
 
@@ -303,7 +312,7 @@ float GCodes::FractionOfFilePrinted() const
 		return 0.0;
 	}
 
-    const FilePosition bytesCached = fileGCode->IsDoingFileMacro() ? 0: fileInput->BytesCached();
+	const FilePosition bytesCached = fileGCode->IsDoingFileMacro() ? 0: fileInput->BytesCached();
 	return (float)(fileBeingPrinted.GetPosition() - bytesCached) / (float)len;
 }
 
@@ -316,8 +325,8 @@ FilePosition GCodes::GetFilePosition() const
 		return 0;
 	}
 
-    const FilePosition bytesCached = fileGCode->IsDoingFileMacro() ? 0: fileInput->BytesCached();
-    return fileBeingPrinted.GetPosition() - bytesCached;
+	const FilePosition bytesCached = fileGCode->IsDoingFileMacro() ? 0: fileInput->BytesCached();
+	return fileBeingPrinted.GetPosition() - bytesCached;
 }
 
 // Start running the config file
@@ -2074,6 +2083,19 @@ bool GCodes::ReHomeOnStall(DriversBitmap stalledDrivers)
 
 #endif
 
+void GCodes::SetMachineAxisLetters(const char *letters, uint8_t n)
+{
+	memset(machineAxisLetters, 0, sizeof(machineAxisLetters));
+	if (n >= sizeof(machineAxisLetters)) // Force null termination
+	{
+		n = sizeof(machineAxisLetters) - 1;
+	}
+	for (size_t i = 0; i < n; i++)
+	{
+		machineAxisLetters[i] = letters[i];
+	}
+}
+
 void GCodes::SaveResumeInfo(bool wasPowerFailure)
 {
 	const char* const printingFilename = reprap.GetPrintMonitor().GetPrintingFilename();
@@ -2248,8 +2270,15 @@ bool GCodes::LockMovementAndWaitForStandstill(const GCodeBuffer& gb)
 		return false;
 	}
 
-	// Get the current positions. These may not be the same as the ones we remembered from last time if we just did a special move.
-	UpdateCurrentUserPosition();
+	if (moveBuffer.alterPositionState)
+	{
+		// Get the current positions. These may not be the same as the ones we remembered from last time if we just did a special move.
+		UpdateCurrentUserPosition();
+	}
+	else
+	{
+		SetMachinePosition(moveBuffer.initialCoords, false);
+	}
 	return true;
 }
 
@@ -2429,6 +2458,7 @@ const char* GCodes::DoStraightMove(GCodeBuffer& gb, bool isCoordinated)
 	moveBuffer.xAxes = reprap.GetCurrentXAxes();
 	moveBuffer.yAxes = reprap.GetCurrentYAxes();
 	moveBuffer.usePressureAdvance = false;
+	moveBuffer.alterPositionState = true;
 	axesToSenseLength = 0;
 
 	// Check to see if the move is a 'homing' move that endstops are checked on.
@@ -2511,7 +2541,18 @@ const char* GCodes::DoStraightMove(GCodeBuffer& gb, bool isCoordinated)
 		// This may be a raw motor move, in which case we need the current raw motor positions in moveBuffer.coords.
 		// If it isn't a raw motor move, it will still be applied without axis or bed transform applied,
 		// so make sure the initial coordinates don't have those either to avoid unwanted Z movement.
-		reprap.GetMove().GetCurrentUserPosition(moveBuffer.coords, moveBuffer.moveType, reprap.GetCurrentXAxes(), reprap.GetCurrentYAxes());
+		const bool hangprinter = reprap.GetMove().GetKinematics().GetKinematicsType() == KinematicsType::hangprinter;
+		if (hangprinter) // Hangprinter may use raw moves during print
+		{
+			const bool recoverAlterPositionState = moveBuffer.alterPositionState;
+			moveBuffer.alterPositionState = true;
+			LockMovementAndWaitForStandstill(gb);
+			moveBuffer.alterPositionState = recoverAlterPositionState;
+		}
+		else
+		{
+			reprap.GetMove().GetCurrentUserPosition(moveBuffer.coords, moveBuffer.moveType, reprap.GetCurrentXAxes(), reprap.GetCurrentYAxes());
+		}
 	}
 
 	// Set up the initial coordinates
@@ -2520,31 +2561,15 @@ const char* GCodes::DoStraightMove(GCodeBuffer& gb, bool isCoordinated)
 	// Deal with XYZ movement
 	const float initialX = currentUserPosition[X_AXIS];
 	const float initialY = currentUserPosition[Y_AXIS];
+	const float initialZ = currentUserPosition[Z_AXIS];
 	AxesBitmap axesMentioned = 0;
 	for (size_t axis = 0; axis < numVisibleAxes; axis++)
 	{
-		if (gb.Seen(axisLetters[axis]))
+		if (moveBuffer.moveType == 0 && gb.Seen(axisLetters[axis]))
 		{
-			// If it is a special move on a delta, movement must be relative.
-			if (moveBuffer.moveType != 0 && !gb.MachineState().axesRelative && reprap.GetMove().GetKinematics().GetKinematicsType() == KinematicsType::linearDelta)
-			{
-				return "G0/G1: attempt to move individual motors of a delta machine to absolute positions";
-			}
-
-			SetBit(axesMentioned, axis);
 			const float moveArg = gb.GetFValue() * distanceScale;
-			if (moveBuffer.moveType != 0 || (rp == nullptr && gb.MachineState().UsingMachineCoordinates()))
-			{
-				if (gb.MachineState().axesRelative)
-				{
-					moveBuffer.coords[axis] += moveArg;
-				}
-				else
-				{
-					moveBuffer.coords[axis] = moveArg;
-				}
-			}
-			else if (rp != nullptr)
+			SetBit(axesMentioned, axis);
+			if (rp != nullptr)
 			{
 				currentUserPosition[axis] = moveArg + rp->moveCoords[axis];
 			}
@@ -2555,6 +2580,42 @@ const char* GCodes::DoStraightMove(GCodeBuffer& gb, bool isCoordinated)
 			else
 			{
 				currentUserPosition[axis] = moveArg;
+			}
+		}
+		else if (moveBuffer.moveType != 0 && gb.Seen(machineAxisLetters[axis]))
+		{
+			const float moveArg = gb.GetFValue() * distanceScale;
+			// If it is a special move on a delta, movement must be relative.
+			if (!gb.MachineState().axesRelative && reprap.GetMove().GetKinematics().GetKinematicsType() == KinematicsType::linearDelta)
+			{
+				return "G0/G1: attempt to move individual motors of a delta machine to absolute positions";
+			}
+			SetBit(axesMentioned, axis);
+			const bool hangprinter = reprap.GetMove().GetKinematics().GetKinematicsType() == KinematicsType::hangprinter;
+			if (gb.MachineState().axesRelative || hangprinter)
+			{
+				moveBuffer.coords[axis] += moveArg;
+				if (hangprinter)
+				{
+				  // Special moves should not be remembered by Hangprinters
+					moveBuffer.alterPositionState = false;
+				}
+			}
+			else
+			{
+				moveBuffer.coords[axis] = moveArg;
+			}
+		}
+		else if ((moveBuffer.moveType != 0 || (rp == nullptr && gb.MachineState().UsingMachineCoordinates())) && gb.Seen(axisLetters[axis]))
+		{
+			const float moveArg = gb.GetFValue() * distanceScale;
+			if (gb.MachineState().axesRelative)
+			{
+				moveBuffer.coords[axis] += moveArg;
+			}
+			else
+			{
+				moveBuffer.coords[axis] = moveArg;
 			}
 		}
 		// If a restore point is being used (G1 R parameter) then we used to set any coordinates that were not mentioned to the restore point values.
@@ -2649,9 +2710,14 @@ const char* GCodes::DoStraightMove(GCodeBuffer& gb, bool isCoordinated)
 		{
 			// This kinematics approximates linear motion by means of segmentation.
 			// We assume that the segments will be smaller than the mesh spacing.
-			const float xyLength = sqrtf(fsquare(currentUserPosition[X_AXIS] - initialX) + fsquare(currentUserPosition[Y_AXIS] - initialY));
-			const float moveTime = xyLength/moveBuffer.feedRate;			// this is a best-case time, often the move will take longer
-			totalSegments = (unsigned int)max<int>(1, min<int>(rintf(xyLength/kin.GetMinSegmentLength()), rintf(moveTime * kin.GetSegmentsPerSecond())));
+			float moveLengthSquared = fsquare(currentUserPosition[X_AXIS] - initialX) + fsquare(currentUserPosition[Y_AXIS] - initialY);
+			if (kin.UseSegmentationZ())
+			{
+				moveLengthSquared += fsquare(currentUserPosition[Z_AXIS] - initialZ);
+			}
+			const float moveLength = sqrtf(moveLengthSquared);
+			const float moveTime = moveLength/moveBuffer.feedRate;			// this is a best-case time, often the move will take longer
+			totalSegments = (unsigned int)max<int>(1, min<int>(rintf(moveLength/kin.GetMinSegmentLength()), rintf(moveTime * kin.GetSegmentsPerSecond())));
 		}
 		else if (reprap.GetMove().IsUsingMesh() && (isCoordinated || machineType == MachineType::fff))
 		{
@@ -4485,7 +4551,7 @@ bool GCodes::ToolHeatersAtSetTemperatures(const Tool *tool, bool waitWhenCooling
 // Set the current position, optionally applying bed and axis compensation
 void GCodes::SetMachinePosition(const float positionNow[MaxTotalDrivers], bool doBedCompensation)
 {
-	memcpy(moveBuffer.coords, positionNow, sizeof(moveBuffer.coords[0] * numTotalAxes));
+	memcpy(moveBuffer.coords, positionNow, sizeof(moveBuffer.coords[0]) * numTotalAxes);
 	reprap.GetMove().SetNewPosition(positionNow, doBedCompensation);
 }
 
