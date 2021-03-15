@@ -318,7 +318,7 @@ int GCodes::ConnectODriveToSerialChannel(size_t whichODrive, size_t whichChannel
 void GCodes::GetEncoderPositionsUART(const StringRef& reply)
 {
 
-	float posCount[4] = { 0.0, 0.0, 0.0, 0.0 }; // motor shaft angular position in units of encoder counts
+	float posCount[4] = { 0.0, 0.0, 0.0, 0.0 }; // motor shaft angular position in units of radians
 	float angDeg[4] = { 0.0, 0.0, 0.0, 0.0 };
 
 	reply.copy("[");
@@ -327,7 +327,7 @@ void GCodes::GetEncoderPositionsUART(const StringRef& reply)
 		const ODrive& odrv = reprap.GetPlatform().GetODrive(axis);
 		const ODriveAxis odrvAxis = odrv.AxisToODriveAxis(axis);
 		posCount[axis] = odrv.AskForEncoderPosEstimate(odrvAxis) - odrv.GetEncoderPosReference(odrvAxis);
-		angDeg[axis] = 360.0*posCount[axis]/odrv.GetCountsPerRev(odrvAxis);
+		angDeg[axis] = 180.0*posCount[axis]/Pi;
 
 		// Correct sign
 		if (!platform.GetDirectionValue(platform.GetAxisDriversConfig(axis).driverNumbers[0]))
@@ -473,9 +473,8 @@ GCodeResult GCodes::MarkEncoderRef(GCodeBuffer& gb, const StringRef& reply)
 				reply.catf("axis: %d, ODrive axis map {%d, %d}, ", axis, odrv.GetAxisMap(M0), odrv.GetAxisMap(M1));
 				ODriveAxis odrvAxis = odrv.AxisToODriveAxis(axis);
 				odrv.StoreEncoderPosReference(odrvAxis);
-				odrv.StoreCountsPerRev(odrvAxis);
-				reply.catf("Set odrv.encoderPosReference[%d] to %.3f and countsPerRev[%d] to %.3f\n",
-						odrvAxis, (double)odrv.GetEncoderPosReference(odrvAxis), odrvAxis, (double)odrv.GetCountsPerRev(odrvAxis));
+				reply.catf("Set odrv.encoderPosReference[%d] to %.3f\n",
+						odrvAxis, (double)odrv.GetEncoderPosReference(odrvAxis));
 			}
 		}
 	}

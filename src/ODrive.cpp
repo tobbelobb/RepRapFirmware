@@ -58,13 +58,6 @@ void ODrive::flush() const
 	serial_ptr->flush();
 }
 
-int32_t ODrive::AskForEncoderConfigCountsPerRev(ODriveAxis axis) const
-{
-	*serial_ptr << "r axis" << axis << ".encoder.config.cpr\n";
-	return readInt();
-}
-
-
 float ODrive::AskForEncoderPosEstimate(ODriveAxis axis) const
 {
 	*serial_ptr << "r axis" << axis << ".encoder.pos_estimate\n";
@@ -74,11 +67,6 @@ float ODrive::AskForEncoderPosEstimate(ODriveAxis axis) const
 void ODrive::StoreEncoderPosReference(ODriveAxis axis)
 {
 	encoderPosReference[axis] = AskForEncoderPosEstimate(axis);
-}
-
-void ODrive::StoreCountsPerRev(ODriveAxis axis)
-{
-	countsPerRev[axis] = AskForEncoderConfigCountsPerRev(axis);
 }
 
 void ODrive::SetCtrlMode(ODriveAxis axis, int ctrlMode) const

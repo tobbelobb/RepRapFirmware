@@ -45,13 +45,10 @@ public:
 	void SetPosSetpoint(ODriveAxis axis, float position) const;
 	void flush() const;
 	float AskForEncoderPosEstimate(ODriveAxis axis) const; // read <axis>.encoder.pos_estimate
-	int32_t AskForEncoderConfigCountsPerRev(ODriveAxis axis) const; // read <axis>.encoder.config.cpr
 
 	// ODrive Firmware can't currently store reference points so this is stored locally in the RRF ODrive object
 	float GetEncoderPosReference(ODriveAxis axis) const { return encoderPosReference[axis]; }
 	void StoreEncoderPosReference(ODriveAxis axis);
-	float GetCountsPerRev(ODriveAxis axis) const { return countsPerRev[axis]; };
-	void StoreCountsPerRev(ODriveAxis axis);
 
 	// General params
 	float readFloat() const;
@@ -66,7 +63,6 @@ public:
 
 private:
 	float encoderPosReference[2]; // One ODrive board can control two axes
-	float countsPerRev[2];
 	Stream* serial_ptr;
 	size_t axes[2];
 
