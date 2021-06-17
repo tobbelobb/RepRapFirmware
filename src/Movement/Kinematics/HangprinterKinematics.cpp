@@ -76,13 +76,13 @@ void HangprinterKinematics::Init() noexcept
 	 * In practice you might want to compensate a bit more or a bit less */
 	constexpr float DefaultSpoolBuildupFactor = 0.007;
 	/* Measure and set spool radii with M669 to achieve better accuracy */
-	constexpr float DefaultSpoolRadii[4] = { 65.0, 65.0, 65.0, 65.0}; // HP4 default
+	constexpr float DefaultSpoolRadii[4] = { 75.0, 75.0, 75.0, 75.0}; // HP4 default
 	/* If axis runs lines back through pulley system, set mechanical advantage accordingly with M669 */
-	constexpr uint32_t DefaultMechanicalAdvantage[4] = { 2, 2, 2, 2}; // HP4 default
+	constexpr uint32_t DefaultMechanicalAdvantage[4] = { 2, 2, 2, 4}; // HP4 default
 	constexpr uint32_t DefaultLinesPerSpool[4] = { 1, 1, 1, 1}; // HP4 default
 	constexpr uint32_t DefaultMotorGearTeeth[4] = {  20,  20,  20,  20}; // HP4 default
 	constexpr uint32_t DefaultSpoolGearTeeth[4] = { 255, 255, 255, 255}; // HP4 default
-	constexpr uint32_t DefaultFullStepsPerMotorRev[4] = { 200, 200, 200, 200};
+	constexpr uint32_t DefaultFullStepsPerMotorRev[4] = { 25, 25, 25, 25};
 	ARRAY_INIT(anchors, DefaultAnchors);
 	printRadius = DefaultPrintRadius;
 	spoolBuildupFactor = DefaultSpoolBuildupFactor;
@@ -499,6 +499,7 @@ void HangprinterKinematics::InverseTransform(float La, float Lb, float Lc, float
 	// Calculate quadratic equation coefficients
 	const float halfB = (S * Q) - (R * T) - U;
 	const float C = fsquare(S) + fsquare(T) + (anchors[A_AXIS][Y_AXIS] * T - anchors[A_AXIS][X_AXIS] * S) * P * 2 + (Da2 - fsquare(La)) * P2;
+	debugPrintf("S: %.2f, T: %.2f, halfB: %.2f, C: %.2f, P: %.2f, A: %.2f\n", (double)S, (double)T, (double)halfB, (double)C, (double)P, (double) A);
 
 	// Solve the quadratic equation for z
 	machinePos[2] = (- halfB - fastSqrtf(fabsf(fsquare(halfB) - A * C)))/A;
