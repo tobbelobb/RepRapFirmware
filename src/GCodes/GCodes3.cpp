@@ -1334,7 +1334,7 @@ GCodeResult GCodes::ConfigureDriver(GCodeBuffer& gb, const StringRef& reply) THR
 	gb.MustSee('P');
 	const DriverId id = gb.GetDriverId();
 #if SUPPORT_CAN_EXPANSION
-	if (id.boardAddress != CanInterface::GetCanAddress())
+	if (id.IsRemote())
 	{
 		return CanInterface::ConfigureRemoteDriver(id, gb, reply);
 	}

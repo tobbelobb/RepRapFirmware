@@ -902,6 +902,13 @@ pre(driver.IsRemote())
 			return cons.SendAndGetResponse(CanMessageType::m569p1, driver.boardAddress, reply);
 		}
 
+#if DUAL_CAN
+	case 3:			// read driver encoder via secondary CAN
+		{
+			return CanInterface::ReadODrive3Encoder(driver, gb, reply);
+		}
+#endif
+
 	default:
 		return GCodeResult::errorNotSupported;
 	}
@@ -1339,6 +1346,12 @@ GCodeResult CanInterface::StartAccelerometer(DriverId device, uint8_t axes, uint
 }
 
 # endif
+
+GCodeResult CanInterface::ReadODrive3Encoder(DriverId driver, GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException)
+{
+	reply.printf("Got the M569.3 message for %u", driver.boardAddress);
+	return GCodeResult::ok;
+}
 
 #endif
 
