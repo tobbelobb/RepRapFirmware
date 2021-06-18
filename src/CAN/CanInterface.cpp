@@ -22,6 +22,8 @@
 #include <GCodes/GCodeException.h>
 #include <GCodes/GCodeBuffer/GCodeBuffer.h>
 
+#include <General/Portability.h>
+
 #if HAS_LINUX_INTERFACE
 # include "Linux/LinuxInterface.h"
 #endif
@@ -1349,8 +1351,47 @@ GCodeResult CanInterface::StartAccelerometer(DriverId device, uint8_t axes, uint
 
 GCodeResult CanInterface::ReadODrive3Encoder(DriverId driver, GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException)
 {
-	reply.printf("Got the M569.3 message for %u", driver.boardAddress);
-	return GCodeResult::ok;
+	if (can1dev == nullptr)
+	{
+		return GCodeResult::error;
+	}
+	CanMessageBuffer * buf = CanMessageBuffer::Allocate();
+	if (buf == nullptr)
+	{
+		reply.copy(NoCanBufferMessage);
+		return GCodeResult::error;
+	}
+	const auto arbitration_id = driver.boardAddress << 5 | 0x09;
+	CanId expectedId;
+	expectedId.SetReceivedId(arbitration_id);
+
+	// Build the message
+	while (CanInterface::ReceivePlainMessage(buf , 0)) { } // Flush CAN receive hardware
+	buf->id = expectedId;
+	buf->extId = false; // ODrive uses 11-bit IDs
+	buf->dataLength = 0;
+	buf->remote = true; // set RTR bit
+
+	CanInterface::SendPlainMessageNoFree(buf, MaxResponseSendWait);
+
+	bool ok = CanInterface::ReceivePlainMessage(buf , MaxResponseSendWait);
+	float encoderEstimate;
+	if (ok)
+	{
+		ok = (buf->id == expectedId) && (buf->dataLength == 4);
+		if (ok)
+		{
+			encoderEstimate = LoadLEFloat(buf->msg.raw); // Assumning little endian response
+			reply.printf(" Received %.2f from driver", (double)encoderEstimate);
+		} else {
+			reply.printf(" buf->id == expectedId=%d, buf->dataLength=%d", buf->id == expectedId, buf->dataLength);
+		}
+	} else {
+		reply.printf("ReceivePlainMessage returned false");
+	}
+
+	CanMessageBuffer::Free(buf);
+	return ok ? GCodeResult::ok : GCodeResult::error;
 }
 
 #endif
