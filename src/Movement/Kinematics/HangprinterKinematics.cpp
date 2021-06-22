@@ -10,7 +10,7 @@
 #include <Platform/Platform.h>
 #include <GCodes/GCodeBuffer/GCodeBuffer.h>
 #include <Movement/Move.h>
-//#include "Movement/BedProbing/RandomProbePointSet.h"
+#include <CAN/CanInterface.h>
 
 // Default anchor coordinates
 // These are only placeholders. Each machine must have these values calibrated in order to work correctly.
@@ -826,6 +826,39 @@ void HangprinterKinematics::PrintParameters(const StringRef& reply) const noexce
 					(double)anchors[A_AXIS][X_AXIS], (double)anchors[A_AXIS][Y_AXIS], (double)anchors[A_AXIS][Z_AXIS],
 					(double)anchors[B_AXIS][X_AXIS], (double)anchors[B_AXIS][Y_AXIS], (double)anchors[B_AXIS][Z_AXIS],
 					(double)anchors[C_AXIS][X_AXIS], (double)anchors[C_AXIS][Y_AXIS], (double)anchors[C_AXIS][Z_AXIS]);
+}
+
+GCodeResult HangprinterKinematics::ReadODrive3Encoder(DriverId driver, GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException)
+{
+	const uint8_t cmd = CANSimple::MSG_GET_ENCODER_ESTIMATES;
+
+	CanMessageBuffer * buf = CanInterface::ODrive::PrepareSimpleMessage(driver, cmd, reply);
+	if (buf == nullptr)
+	{
+		return GCodeResult::error;
+	}
+
+	CanInterface::SendPlainMessageNoFree(buf);
+
+	bool ok = CanInterface::ODrive::GetExpectedSimpleMessage(buf, driver, cmd, reply);
+
+	if (ok)
+	{
+		size_t const expectedResponseLength = 8;
+		ok = (buf->dataLength == expectedResponseLength);
+		if (ok)
+		{
+			float const encoderEstimate = LoadLEFloat(buf->msg.raw);
+			reply.printf("Received %.2f from driver", (double)encoderEstimate);
+		}
+		else
+		{
+			reply.printf("Unexpected response length: %d", buf->dataLength);
+		}
+	}
+
+	CanMessageBuffer::Free(buf);
+	return ok ? GCodeResult::ok : GCodeResult::error;
 }
 
 // End

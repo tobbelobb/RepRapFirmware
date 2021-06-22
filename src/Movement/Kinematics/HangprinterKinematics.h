@@ -40,6 +40,7 @@ public:
 #if HAS_MASS_STORAGE
 	bool WriteResumeSettings(FileStore *f) const noexcept override;
 #endif
+	static GCodeResult ReadODrive3Encoder(DriverId driver, GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException);
 
 protected:
 	DECLARE_OBJECT_MODEL
@@ -82,6 +83,40 @@ private:
 	float P, Q, R, P2, U, A;
 
 	bool doneAutoCalibration;							// True if we have done auto calibration
+};
+
+// Protocol copied from ODrive Firmware source:
+// https://github.com/odriverobotics/ODrive/blob/0256229b229255551c183afc0df390111ae1fa52/Firmware/communication/can/can_simple.hpp
+class CANSimple {
+   public:
+    enum {
+        MSG_CO_NMT_CTRL = 0x000,       // CANOpen NMT Message REC
+        MSG_ODRIVE_HEARTBEAT,
+        MSG_ODRIVE_ESTOP,
+        MSG_GET_MOTOR_ERROR,  // Errors
+        MSG_GET_ENCODER_ERROR,
+        MSG_GET_SENSORLESS_ERROR,
+        MSG_SET_AXIS_NODE_ID,
+        MSG_SET_AXIS_REQUESTED_STATE,
+        MSG_SET_AXIS_STARTUP_CONFIG,
+        MSG_GET_ENCODER_ESTIMATES,
+        MSG_GET_ENCODER_COUNT,
+        MSG_SET_CONTROLLER_MODES,
+        MSG_SET_INPUT_POS,
+        MSG_SET_INPUT_VEL,
+        MSG_SET_INPUT_TORQUE,
+        MSG_SET_VEL_LIMIT,
+        MSG_START_ANTICOGGING,
+        MSG_SET_TRAJ_VEL_LIMIT,
+        MSG_SET_TRAJ_ACCEL_LIMITS,
+        MSG_SET_TRAJ_INERTIA,
+        MSG_GET_IQ,
+        MSG_GET_SENSORLESS_ESTIMATES,
+        MSG_RESET_ODRIVE,
+        MSG_GET_VBUS_VOLTAGE,
+        MSG_CLEAR_ERRORS,
+        MSG_CO_HEARTBEAT_CMD = 0x700,  // CANOpen NMT Heartbeat  SEND
+    };
 };
 
 #endif /* SRC_MOVEMENT_KINEMATICS_HANGPRINTERKINEMATICS_H_ */

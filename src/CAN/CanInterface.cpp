@@ -15,6 +15,7 @@
 #include <CanMessageBuffer.h>
 #include <Movement/DDA.h>
 #include <Movement/DriveMovement.h>
+#include <Movement/Kinematics/HangprinterKinematics.h>
 #include <Movement/StepTimer.h>
 #include <Movement/Move.h>
 #include <RTOSIface/RTOSIface.h>
@@ -800,12 +801,12 @@ void CanInterface::SendMessageNoReplyNoFree(CanMessageBuffer *buf) noexcept
 
 #if DUAL_CAN
 
-uint32_t CanInterface::SendPlainMessageNoFree(CanMessageBuffer *buf, uint32_t timeout) noexcept
+uint32_t CanInterface::SendPlainMessageNoFree(CanMessageBuffer *buf) noexcept
 {
-	return (can1dev != nullptr) ? can1dev->SendMessage(CanDevice::TxBufferNumber::fifo, timeout, buf) : 0;
+	return (can1dev != nullptr) ? can1dev->SendMessage(CanDevice::TxBufferNumber::fifo, MaxResponseSendWait, buf) : 0;
 }
 
-bool CanInterface::ReceivePlainMessage(CanMessageBuffer *buf, uint32_t timeout) noexcept
+bool CanInterface::ReceivePlainMessage(CanMessageBuffer *buf, uint32_t const timeout) noexcept
 {
 	return can1dev != nullptr && can1dev->ReceiveMessage(CanDevice::RxBufferNumber::fifo0, timeout, buf);
 }
@@ -907,7 +908,10 @@ pre(driver.IsRemote())
 #if DUAL_CAN
 	case 3:			// read driver encoder via secondary CAN
 		{
-			return CanInterface::ReadODrive3Encoder(driver, gb, reply);
+			if (reprap.GetMove().GetKinematics().GetKinematicsType() == KinematicsType::hangprinter) {
+				return HangprinterKinematics::ReadODrive3Encoder(driver, gb, reply);
+			}
+			return GCodeResult::errorNotSupported;
 		}
 #endif
 
@@ -1349,26 +1353,40 @@ GCodeResult CanInterface::StartAccelerometer(DriverId device, uint8_t axes, uint
 
 # endif
 
-GCodeResult CanInterface::ReadODrive3Encoder(DriverId driver, GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException)
+static CanId ArbitrationId(DriverId const driver, uint8_t cmd) {
+	const auto arbitration_id = (driver.boardAddress << 5) + cmd;
+	CanId canId;
+	canId.SetReceivedId(arbitration_id);
+	return canId;
+}
+
+CanMessageBuffer * CanInterface::ODrive::PrepareSimpleMessage(DriverId const driver, uint8_t const cmd, const StringRef& reply)
 {
+	// Detect any early return conditions
 	if (can1dev == nullptr)
 	{
-		return GCodeResult::error;
+		return nullptr;
+	}
+	if (cmd & 0xE0) // Top three bits must be zero
+	{
+		reply.copy("Simple CAN command not supported");
+		return nullptr;
 	}
 	CanMessageBuffer * buf = CanMessageBuffer::Allocate();
 	if (buf == nullptr)
 	{
 		reply.copy(NoCanBufferMessage);
-		return GCodeResult::error;
+		return nullptr;
 	}
-	const auto arbitration_id = driver.boardAddress << 5 | 0x09;
-	CanId expectedId;
-	expectedId.SetReceivedId(arbitration_id);
+
+	// Find the correct arbitration id
+
+ 	// Flush CAN receive hardware
+	while (CanInterface::ReceivePlainMessage(buf , 0)) { }
 
 	// Build the message
-	while (CanInterface::ReceivePlainMessage(buf , 0)) { } // Flush CAN receive hardware
+	buf->id = ArbitrationId(driver, cmd);
 	buf->marker = 0;
-	buf->id = expectedId;
 	buf->extId = false; // ODrive uses 11-bit IDs
 	buf->fdMode = false;
 	buf->useBrs = false;
@@ -1376,30 +1394,24 @@ GCodeResult CanInterface::ReadODrive3Encoder(DriverId driver, GCodeBuffer& gb, c
 	buf->remote = true; // set RTR bit
 	buf->reportInFifo = false;
 
-	CanInterface::SendPlainMessageNoFree(buf, MaxResponseSendWait);
+	return buf;
+}
+
+bool CanInterface::ODrive::GetExpectedSimpleMessage(CanMessageBuffer *buf, DriverId const driver, uint8_t const cmd, const StringRef& reply)
+{
+	CanId const expectedId = ArbitrationId(driver, cmd);
 
 	bool ok = true;
 	do{
-		ok = CanInterface::ReceivePlainMessage(buf , MaxResponseSendWait);
+		ok = ReceivePlainMessage(buf, MaxResponseSendWait);
 	} while (ok and buf->id != expectedId);
 
-	float encoderEstimate;
-	if (ok)
+	if (not ok)
 	{
-		ok = (buf->id == expectedId) && (buf->dataLength == 8);
-		if (ok)
-		{
-			encoderEstimate = LoadLEFloat(buf->msg.raw); // Assumning little endian response
-			reply.printf(" Received %.2f from driver", (double)encoderEstimate);
-		} else {
-			reply.printf(" buf->id=%d, expectedId=%d, buf->dataLength=%d", buf->id, expectedId, buf->dataLength);
-		}
-	} else {
 		reply.printf("ReceivePlainMessage returned false");
 	}
 
-	CanMessageBuffer::Free(buf);
-	return ok ? GCodeResult::ok : GCodeResult::error;
+	return ok;
 }
 
 #endif
