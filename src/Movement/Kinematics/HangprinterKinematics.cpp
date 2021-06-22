@@ -830,6 +830,7 @@ void HangprinterKinematics::PrintParameters(const StringRef& reply) const noexce
 
 GCodeResult HangprinterKinematics::ReadODrive3Encoder(DriverId driver, GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException)
 {
+	Platform& platform = reprap.GetPlatform();
 	const uint8_t cmd = CANSimple::MSG_GET_ENCODER_ESTIMATES;
 
 	CanMessageBuffer * buf = CanInterface::ODrive::PrepareSimpleMessage(driver, cmd, reply);
@@ -848,8 +849,14 @@ GCodeResult HangprinterKinematics::ReadODrive3Encoder(DriverId driver, GCodeBuff
 		ok = (buf->dataLength == expectedResponseLength);
 		if (ok)
 		{
-			float const encoderEstimate = LoadLEFloat(buf->msg.raw);
-			reply.printf("Received %.2f from driver", (double)encoderEstimate);
+			float encoderEstimate = LoadLEFloat(buf->msg.raw) * 360.0;
+
+			// Correct sign
+			if (!platform.GetDirectionValue(driver.localDriver))
+			{
+				encoderEstimate *= -1.0;
+			}
+			reply.catf("%.2f, ", (double)encoderEstimate);
 		}
 		else
 		{

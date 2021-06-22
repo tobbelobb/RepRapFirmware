@@ -1332,14 +1332,34 @@ GCodeResult GCodes::ReceiveI2c(GCodeBuffer& gb, const StringRef &reply)
 GCodeResult GCodes::ConfigureDriver(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException)
 {
 	gb.MustSee('P');
-	const DriverId id = gb.GetDriverId();
-#if SUPPORT_CAN_EXPANSION
-	if (id.IsRemote())
+	size_t drivesCount = numVisibleAxes;
+	DriverId driverIds[drivesCount];
+	gb.GetDriverIdArray(driverIds, drivesCount);
+	bool const isEncoderReading = (gb.GetCommandFraction() == 3);
+	for (size_t i = 0; i < drivesCount; ++i)
 	{
-		return CanInterface::ConfigureRemoteDriver(id, gb, reply);
+		DriverId const id = driverIds[i];
+#if SUPPORT_CAN_EXPANSION
+		if (id.IsRemote())
+		{
+			if (isEncoderReading and i == 0) {
+				reply.copy("[");
+			}
+			GCodeResult const res = CanInterface::ConfigureRemoteDriver(id, gb, reply);
+			if (res != GCodeResult::ok)
+			{
+				return res;
+			}
+			if (isEncoderReading and i == drivesCount - 1)
+			{
+				reply.cat(" ],\n");
+				return res;
+			}
+		}
 	}
 #endif
 
+	const DriverId id = gb.GetDriverId();
 	const uint8_t drive = id.localDriver;
 	switch (gb.GetCommandFraction())
 	{
