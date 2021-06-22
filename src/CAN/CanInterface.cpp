@@ -23,7 +23,6 @@
 #include <GCodes/GCodeException.h>
 #include <GCodes/GCodeBuffer/GCodeBuffer.h>
 
-#include <General/Portability.h>
 
 #if HAS_LINUX_INTERFACE
 # include "Linux/LinuxInterface.h"
