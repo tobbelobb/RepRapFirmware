@@ -1400,14 +1400,18 @@ bool CanInterface::ODrive::GetExpectedSimpleMessage(CanMessageBuffer *buf, Drive
 {
 	CanId const expectedId = ArbitrationId(driver, cmd);
 
+	int count = 0;
 	bool ok = true;
 	do{
 		ok = ReceivePlainMessage(buf, MaxResponseSendWait);
-	} while (ok and buf->id != expectedId);
+		count++;
+	} while (ok and buf->id != expectedId and count < 5);
+
+	ok = ok and buf->id == expectedId;
 
 	if (not ok)
 	{
-		reply.printf("ReceivePlainMessage returned false");
+		reply.printf("Message not received");
 	}
 
 	return ok;

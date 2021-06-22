@@ -834,6 +834,30 @@ GCodeResult HangprinterKinematics::ReadODrive3Encoder(DriverId driver, GCodeBuff
 {
 	Platform& platform = reprap.GetPlatform();
 	const uint8_t cmd = CANSimple::MSG_GET_ENCODER_ESTIMATES;
+	static CanAddress seenDrives[HANGPRINTER_AXES] = { 0, 0, 0, 0 };
+	static float referencePositions[HANGPRINTER_AXES] = { 0.0, 0.0, 0.0, 0.0 };
+	static size_t numSeenDrives = 0;
+	size_t thisDriveIdx = 0;
+
+	while (thisDriveIdx < numSeenDrives and seenDrives[thisDriveIdx] != driver.boardAddress)
+	{
+		thisDriveIdx++;
+	}
+	bool const newOne = (thisDriveIdx == numSeenDrives);
+	if (newOne)
+	{
+		if (numSeenDrives < HANGPRINTER_AXES)
+		{
+			seenDrives[thisDriveIdx] = driver.boardAddress;
+			numSeenDrives++;
+		}
+		else // we don't have space for a new one
+		{
+			reply.printf("Max CAN addresses we can reference is %d. Can't reference board %d.", HANGPRINTER_AXES, driver.boardAddress);
+			numSeenDrives = HANGPRINTER_AXES;
+			return GCodeResult::error;
+		}
+	}
 
 	CanMessageBuffer * buf = CanInterface::ODrive::PrepareSimpleMessage(driver, cmd, reply);
 	if (buf == nullptr)
@@ -852,18 +876,31 @@ GCodeResult HangprinterKinematics::ReadODrive3Encoder(DriverId driver, GCodeBuff
 		if (ok)
 		{
 			float encoderEstimate = LoadLEFloat(buf->msg.raw) * 360.0;
-
 			// Correct sign
 			if (!platform.GetDirectionValue(driver.localDriver))
 			{
 				encoderEstimate *= -1.0;
 			}
+			// See if we should insert estimate into cached reference positions
+			if (gb.Seen('S'))
+			{
+				referencePositions[thisDriveIdx] = encoderEstimate;
+			}
+			// Subtract reference value
+			encoderEstimate = encoderEstimate - referencePositions[thisDriveIdx];
+
 			reply.catf("%.2f, ", (double)encoderEstimate);
 		}
 		else
 		{
 			reply.printf("Unexpected response length: %d", buf->dataLength);
 		}
+	}
+
+	if (newOne and not ok)
+	{
+		seenDrives[thisDriveIdx] = 0;
+		numSeenDrives--;
 	}
 
 	CanMessageBuffer::Free(buf);
