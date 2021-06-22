@@ -1367,24 +1367,32 @@ GCodeResult CanInterface::ReadODrive3Encoder(DriverId driver, GCodeBuffer& gb, c
 
 	// Build the message
 	while (CanInterface::ReceivePlainMessage(buf , 0)) { } // Flush CAN receive hardware
+	buf->marker = 0;
 	buf->id = expectedId;
 	buf->extId = false; // ODrive uses 11-bit IDs
+	buf->fdMode = false;
+	buf->useBrs = false;
 	buf->dataLength = 0;
 	buf->remote = true; // set RTR bit
+	buf->reportInFifo = false;
 
 	CanInterface::SendPlainMessageNoFree(buf, MaxResponseSendWait);
 
-	bool ok = CanInterface::ReceivePlainMessage(buf , MaxResponseSendWait);
+	bool ok = true;
+	do{
+		ok = CanInterface::ReceivePlainMessage(buf , MaxResponseSendWait);
+	} while (ok and buf->id != expectedId);
+
 	float encoderEstimate;
 	if (ok)
 	{
-		ok = (buf->id == expectedId) && (buf->dataLength == 4);
+		ok = (buf->id == expectedId) && (buf->dataLength == 8);
 		if (ok)
 		{
 			encoderEstimate = LoadLEFloat(buf->msg.raw); // Assumning little endian response
 			reply.printf(" Received %.2f from driver", (double)encoderEstimate);
 		} else {
-			reply.printf(" buf->id == expectedId=%d, buf->dataLength=%d", buf->id == expectedId, buf->dataLength);
+			reply.printf(" buf->id=%d, expectedId=%d, buf->dataLength=%d", buf->id, expectedId, buf->dataLength);
 		}
 	} else {
 		reply.printf("ReceivePlainMessage returned false");
