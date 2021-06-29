@@ -975,10 +975,9 @@ GCodeResult HangprinterKinematics::SetODrive3PosMode(DriverId const driver, cons
 	return GCodeResult::error;
 }
 
-GCodeResult HangprinterKinematics::SetODrive3TorqueMode(DriverId const driver, float const torque, const StringRef& reply)
+GCodeResult HangprinterKinematics::SetODrive3TorqueMode(DriverId const driver, float torque, const StringRef& reply)
 {
 	GCodeResult res = GCodeResult::ok;
-	//constexpr float MAX_TORQUE_NM = 0.5f;
 	constexpr double MIN_TORQUE_NM = 0.0001;
 	if (fabs(torque) < MIN_TORQUE_NM)
 	{
@@ -990,6 +989,12 @@ GCodeResult HangprinterKinematics::SetODrive3TorqueMode(DriverId const driver, f
 	}
 	else
 	{
+		// Set the right sign
+		torque = std::abs(torque);
+		if (reprap.GetPlatform().GetDirectionValue(driver.localDriver))
+		{
+			torque = -torque;
+		}
 		res = SetODrive3TorqueModeInner(driver, torque, reply);
 		if (res == GCodeResult::ok)
 		{
