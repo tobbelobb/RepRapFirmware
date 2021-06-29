@@ -1356,8 +1356,8 @@ GCodeResult GCodes::ConfigureDriver(GCodeBuffer& gb, const StringRef& reply) THR
 				return res;
 			}
 		}
-	}
 #endif
+	}
 
 	const DriverId id = gb.GetDriverId();
 	const uint8_t drive = id.localDriver;
