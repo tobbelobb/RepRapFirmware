@@ -1346,13 +1346,12 @@ GCodeResult GCodes::ConfigureDriver(GCodeBuffer& gb, const StringRef& reply) THR
 				reply.copy("[");
 			}
 			GCodeResult const res = CanInterface::ConfigureRemoteDriver(id, gb, reply);
-			if (res != GCodeResult::ok)
-			{
-				return res;
-			}
 			if (isEncoderReading and i == drivesCount - 1)
 			{
 				reply.cat(" ],\n");
+			}
+			if (i == drivesCount - 1 or res != GCodeResult::ok)
+			{
 				return res;
 			}
 		}
