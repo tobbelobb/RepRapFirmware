@@ -87,7 +87,7 @@ private:
 	bool doneAutoCalibration;							// True if we have done auto calibration
 
 	// Some CAN helpers
-	static std::optional<float> GetODrive3EncoderEstimate(DriverId driver, bool makeReference, const StringRef& reply) THROWS(GCodeException);
+	static std::optional<float> GetODrive3EncoderEstimate(DriverId driver, bool makeReference, const StringRef& reply, bool subtractReference) THROWS(GCodeException);
 	static GCodeResult SetODrive3TorqueModeInner(DriverId driver, float torque, const StringRef& reply);
 	static GCodeResult SetODrive3PosMode(DriverId driver, const StringRef& reply);
 };

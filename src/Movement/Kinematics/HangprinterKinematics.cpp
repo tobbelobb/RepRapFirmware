@@ -830,7 +830,7 @@ void HangprinterKinematics::PrintParameters(const StringRef& reply) const noexce
 					(double)anchors[C_AXIS][X_AXIS], (double)anchors[C_AXIS][Y_AXIS], (double)anchors[C_AXIS][Z_AXIS]);
 }
 
-std::optional<float> HangprinterKinematics::GetODrive3EncoderEstimate(DriverId const driver, bool const makeReference, const StringRef& reply)
+std::optional<float> HangprinterKinematics::GetODrive3EncoderEstimate(DriverId const driver, bool const makeReference, const StringRef& reply, bool const subtractReference)
 {
 	const uint8_t cmd = CANSimple::MSG_GET_ENCODER_ESTIMATES;
 	static CanAddress seenDrives[HANGPRINTER_AXES] = { 0, 0, 0, 0 };
@@ -886,7 +886,10 @@ std::optional<float> HangprinterKinematics::GetODrive3EncoderEstimate(DriverId c
 				referencePositions[thisDriveIdx] = encoderEstimate;
 			}
 			// Subtract reference value
-			encoderEstimate = encoderEstimate - referencePositions[thisDriveIdx];
+			if (subtractReference)
+			{
+				encoderEstimate = encoderEstimate - referencePositions[thisDriveIdx];
+			}
 		}
 		else
 		{
@@ -910,7 +913,7 @@ std::optional<float> HangprinterKinematics::GetODrive3EncoderEstimate(DriverId c
 
 GCodeResult HangprinterKinematics::ReadODrive3Encoder(DriverId const driver, GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException)
 {
-	std::optional<float> const estimate = GetODrive3EncoderEstimate(driver, gb.Seen('S'), reply);
+	std::optional<float> const estimate = GetODrive3EncoderEstimate(driver, gb.Seen('S'), reply, true);
 	if (estimate.has_value())
 	{
 		reply.catf("%.2f, ", (double)(estimate.value() * 360.0));
@@ -946,7 +949,7 @@ GCodeResult HangprinterKinematics::SetODrive3TorqueModeInner(DriverId const driv
 
 GCodeResult HangprinterKinematics::SetODrive3PosMode(DriverId const driver, const StringRef& reply)
 {
-	std::optional<float> const estimate = GetODrive3EncoderEstimate(driver, false, reply);
+	std::optional<float> const estimate = GetODrive3EncoderEstimate(driver, false, reply, false);
 	if (estimate.has_value())
 	{
 		float const desiredPos = estimate.value();
