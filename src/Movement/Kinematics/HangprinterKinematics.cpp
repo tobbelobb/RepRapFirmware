@@ -830,9 +830,8 @@ void HangprinterKinematics::PrintParameters(const StringRef& reply) const noexce
 					(double)anchors[C_AXIS][X_AXIS], (double)anchors[C_AXIS][Y_AXIS], (double)anchors[C_AXIS][Z_AXIS]);
 }
 
-GCodeResult HangprinterKinematics::ReadODrive3Encoder(DriverId driver, GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException)
+std::optional<float> HangprinterKinematics::GetODrive3EncoderEstimate(DriverId const driver, bool const makeReference, const StringRef& reply)
 {
-	Platform& platform = reprap.GetPlatform();
 	const uint8_t cmd = CANSimple::MSG_GET_ENCODER_ESTIMATES;
 	static CanAddress seenDrives[HANGPRINTER_AXES] = { 0, 0, 0, 0 };
 	static float referencePositions[HANGPRINTER_AXES] = { 0.0, 0.0, 0.0, 0.0 };
@@ -855,41 +854,39 @@ GCodeResult HangprinterKinematics::ReadODrive3Encoder(DriverId driver, GCodeBuff
 		{
 			reply.printf("Max CAN addresses we can reference is %d. Can't reference board %d.", HANGPRINTER_AXES, driver.boardAddress);
 			numSeenDrives = HANGPRINTER_AXES;
-			return GCodeResult::error;
+			return {};
 		}
 	}
 
 	CanMessageBuffer * buf = CanInterface::ODrive::PrepareSimpleMessage(driver, cmd, reply);
 	if (buf == nullptr)
 	{
-		return GCodeResult::error;
+		return {};
 	}
 
 	CanInterface::SendPlainMessageNoFree(buf);
 
 	bool ok = CanInterface::ODrive::GetExpectedSimpleMessage(buf, driver, cmd, reply);
-
+	float encoderEstimate = 0.0;
 	if (ok)
 	{
 		size_t const expectedResponseLength = 8;
 		ok = (buf->dataLength == expectedResponseLength);
 		if (ok)
 		{
-			float encoderEstimate = LoadLEFloat(buf->msg.raw) * 360.0;
+			encoderEstimate = LoadLEFloat(buf->msg.raw);
 			// Correct sign
-			if (!platform.GetDirectionValue(driver.localDriver))
+			if (!reprap.GetPlatform().GetDirectionValue(driver.localDriver))
 			{
 				encoderEstimate *= -1.0;
 			}
 			// See if we should insert estimate into cached reference positions
-			if (gb.Seen('S'))
+			if (makeReference)
 			{
 				referencePositions[thisDriveIdx] = encoderEstimate;
 			}
 			// Subtract reference value
 			encoderEstimate = encoderEstimate - referencePositions[thisDriveIdx];
-
-			reply.catf("%.2f, ", (double)encoderEstimate);
 		}
 		else
 		{
@@ -904,7 +901,57 @@ GCodeResult HangprinterKinematics::ReadODrive3Encoder(DriverId driver, GCodeBuff
 	}
 
 	CanMessageBuffer::Free(buf);
-	return ok ? GCodeResult::ok : GCodeResult::error;
+	if (ok)
+	{
+		return encoderEstimate;
+	}
+	return {};
+}
+
+GCodeResult HangprinterKinematics::ReadODrive3Encoder(DriverId const driver, GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException)
+{
+	std::optional<float> const estimate = GetODrive3EncoderEstimate(driver, gb.Seen('S'), reply);
+	if (estimate.has_value())
+	{
+		reply.catf("%.2f, ", (double)(estimate.value() * 360.0));
+		return GCodeResult::ok;
+	}
+	return GCodeResult::error;
+}
+
+GCodeResult HangprinterKinematics::SetODrive3PosMode(DriverId const driver, const StringRef& reply)
+{
+	std::optional<float> const estimate = GetODrive3EncoderEstimate(driver, false, reply);
+	if (estimate.has_value())
+	{
+		const float desiredPos = estimate.value();
+		//odrv.SetPosSetpoint(odrvAxis, desiredPos);
+		//odrv.EnablePositionControlMode(odrvAxis);
+		//odrv.SetTorque(odrvAxis, 0.0);
+
+
+		return GCodeResult::ok;
+	}
+	return GCodeResult::error;
+}
+
+GCodeResult HangprinterKinematics::SetODrive3TorqueMode(DriverId const driver, float const torque, const StringRef& reply)
+{
+	GCodeResult res = GCodeResult::ok;
+	//constexpr float MAX_TORQUE_NM = 0.5f;
+	constexpr double MIN_TORQUE_NM = 0.0001;
+	if (fabs(torque) < MIN_TORQUE_NM)
+	{
+		res = SetODrive3PosMode(driver, reply);
+		if (res == GCodeResult::ok)
+		{
+			reply.cat("pos_mode, ");
+		}
+	}
+	else
+	{
+	}
+	return res;
 }
 
 // End

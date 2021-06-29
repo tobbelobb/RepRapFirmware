@@ -9,6 +9,7 @@
 #define SRC_MOVEMENT_KINEMATICS_HANGPRINTERKINEMATICS_H_
 
 #include "RoundBedKinematics.h"
+#include <optional>
 
 class HangprinterKinematics : public RoundBedKinematics
 {
@@ -40,7 +41,10 @@ public:
 #if HAS_MASS_STORAGE
 	bool WriteResumeSettings(FileStore *f) const noexcept override;
 #endif
+	static std::optional<float> GetODrive3EncoderEstimate(DriverId driver, bool makeReference, const StringRef& reply) THROWS(GCodeException);
 	static GCodeResult ReadODrive3Encoder(DriverId driver, GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException);
+	static GCodeResult SetODrive3TorqueMode(DriverId driver, float torque, const StringRef& reply);
+	static GCodeResult SetODrive3PosMode(DriverId driver, const StringRef& reply);
 
 protected:
 	DECLARE_OBJECT_MODEL

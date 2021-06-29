@@ -1336,22 +1336,24 @@ GCodeResult GCodes::ConfigureDriver(GCodeBuffer& gb, const StringRef& reply) THR
 	DriverId driverIds[drivesCount];
 	gb.GetDriverIdArray(driverIds, drivesCount);
 	bool const isEncoderReading = (gb.GetCommandFraction() == 3);
+
 	for (size_t i = 0; i < drivesCount; ++i)
 	{
 		DriverId const id = driverIds[i];
 #if SUPPORT_CAN_EXPANSION
 		if (id.IsRemote())
 		{
-			if (isEncoderReading and i == 0) {
+			if (i == 0 and isEncoderReading)
+			{
 				reply.copy("[");
 			}
 			GCodeResult const res = CanInterface::ConfigureRemoteDriver(id, gb, reply);
-			if (isEncoderReading and i == drivesCount - 1)
-			{
-				reply.cat(" ],\n");
-			}
 			if (i == drivesCount - 1 or res != GCodeResult::ok)
 			{
+				if (isEncoderReading and res == GCodeResult::ok)
+				{
+					reply.cat(" ],\n");
+				}
 				return res;
 			}
 		}

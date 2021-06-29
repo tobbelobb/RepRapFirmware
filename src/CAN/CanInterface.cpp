@@ -905,6 +905,15 @@ pre(driver.IsRemote())
 		}
 
 #if DUAL_CAN
+	case 2:			// set driver torque mode via secondary CAN
+		{
+			if (reprap.GetMove().GetKinematics().GetKinematicsType() == KinematicsType::hangprinter) {
+				gb.MustSee('T');
+				const float torque = gb.GetFValue();
+				return HangprinterKinematics::SetODrive3TorqueMode(driver, torque, reply);
+			}
+			return GCodeResult::errorNotSupported;
+		}
 	case 3:			// read driver encoder via secondary CAN
 		{
 			if (reprap.GetMove().GetKinematics().GetKinematicsType() == KinematicsType::hangprinter) {
