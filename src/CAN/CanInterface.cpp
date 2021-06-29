@@ -1361,7 +1361,7 @@ GCodeResult CanInterface::StartAccelerometer(DriverId device, uint8_t axes, uint
 
 # endif
 
-static CanId ArbitrationId(DriverId const driver, uint8_t cmd) {
+CanId CanInterface::ODrive::ArbitrationId(DriverId const driver, uint8_t const cmd) {
 	const auto arbitration_id = (driver.boardAddress << 5) + cmd;
 	CanId canId;
 	canId.SetReceivedId(arbitration_id);

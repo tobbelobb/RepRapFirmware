@@ -41,10 +41,8 @@ public:
 #if HAS_MASS_STORAGE
 	bool WriteResumeSettings(FileStore *f) const noexcept override;
 #endif
-	static std::optional<float> GetODrive3EncoderEstimate(DriverId driver, bool makeReference, const StringRef& reply) THROWS(GCodeException);
 	static GCodeResult ReadODrive3Encoder(DriverId driver, GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException);
 	static GCodeResult SetODrive3TorqueMode(DriverId driver, float torque, const StringRef& reply);
-	static GCodeResult SetODrive3PosMode(DriverId driver, const StringRef& reply);
 
 protected:
 	DECLARE_OBJECT_MODEL
@@ -87,10 +85,17 @@ private:
 	float P, Q, R, P2, U, A;
 
 	bool doneAutoCalibration;							// True if we have done auto calibration
+
+	// Some CAN helpers
+	static std::optional<float> GetODrive3EncoderEstimate(DriverId driver, bool makeReference, const StringRef& reply) THROWS(GCodeException);
+	static GCodeResult SetODrive3TorqueModeInner(DriverId driver, float torque, const StringRef& reply);
+	static GCodeResult SetODrive3PosMode(DriverId driver, const StringRef& reply);
 };
 
 // Protocol copied from ODrive Firmware source:
 // https://github.com/odriverobotics/ODrive/blob/0256229b229255551c183afc0df390111ae1fa52/Firmware/communication/can/can_simple.hpp
+// and
+// https://github.com/odriverobotics/ODrive/blob/0256229b229255551c183afc0df390111ae1fa52/GUI/src/assets/odriveEnums.json
 class CANSimple {
    public:
     enum {
@@ -121,6 +126,19 @@ class CANSimple {
         MSG_CLEAR_ERRORS,
         MSG_CO_HEARTBEAT_CMD = 0x700,  // CANOpen NMT Heartbeat  SEND
     };
+    static const int32_t CONTROL_MODE_VOLTAGE_CONTROL = 0;
+    static const int32_t CONTROL_MODE_TORQUE_CONTROL = 1;
+    static const int32_t CONTROL_MODE_VELOCITY_CONTROL = 2;
+    static const int32_t CONTROL_MODE_POSITION_CONTROL = 3;
+    static const int32_t INPUT_MODE_INACTIVE = 0;
+    static const int32_t INPUT_MODE_PASSTHROUGH = 1;
+    static const int32_t INPUT_MODE_VEL_RAMP = 2;
+    static const int32_t INPUT_MODE_POS_FILTER = 3;
+    static const int32_t INPUT_MODE_MIX_CHANNELS = 4;
+    static const int32_t INPUT_MODE_TRAP_TRAJ = 5;
+    static const int32_t INPUT_MODE_TORQUE_RAMP = 6;
+    static const int32_t INPUT_MODE_MIRROR = 7;
+    static const int32_t INPUT_MODE_TUNING = 8;
 };
 
 #endif /* SRC_MOVEMENT_KINEMATICS_HANGPRINTERKINEMATICS_H_ */

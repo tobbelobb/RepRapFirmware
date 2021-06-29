@@ -139,6 +139,7 @@ namespace CanInterface
 #endif
 
 namespace ODrive {
+	CanId ArbitrationId(DriverId driver, uint8_t cmd);
 	CanMessageBuffer * PrepareSimpleMessage(DriverId const driver, uint8_t const cmd, const StringRef& reply);
 	bool GetExpectedSimpleMessage(CanMessageBuffer *buf, DriverId const driver, uint8_t const cmd, const StringRef& reply);
 }

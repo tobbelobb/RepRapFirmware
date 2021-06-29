@@ -919,17 +919,57 @@ GCodeResult HangprinterKinematics::ReadODrive3Encoder(DriverId const driver, GCo
 	return GCodeResult::error;
 }
 
+GCodeResult HangprinterKinematics::SetODrive3TorqueModeInner(DriverId const driver, float const torque, const StringRef& reply)
+{
+	// Set the right target torque
+	CanMessageBuffer * buf = CanInterface::ODrive::PrepareSimpleMessage(driver, CANSimple::MSG_SET_INPUT_TORQUE, reply);
+	if (buf == nullptr)
+	{
+		return GCodeResult::error;
+	}
+	buf->dataLength = 4;
+	buf->remote = false;
+	memcpy(buf->msg.raw, &torque, sizeof(torque));
+	CanInterface::SendPlainMessageNoFree(buf);
+
+	// Enable Torque Control Mode
+	buf->id = CanInterface::ODrive::ArbitrationId(driver, CANSimple::MSG_SET_CONTROLLER_MODES);
+	buf->dataLength = 8;
+	buf->remote = false;
+	buf->msg.raw32[0] = CANSimple::CONTROL_MODE_TORQUE_CONTROL;
+	buf->msg.raw32[1] = CANSimple::INPUT_MODE_PASSTHROUGH;
+	CanInterface::SendPlainMessageNoFree(buf);
+
+	CanMessageBuffer::Free(buf);
+	return GCodeResult::ok;
+}
+
 GCodeResult HangprinterKinematics::SetODrive3PosMode(DriverId const driver, const StringRef& reply)
 {
 	std::optional<float> const estimate = GetODrive3EncoderEstimate(driver, false, reply);
 	if (estimate.has_value())
 	{
-		const float desiredPos = estimate.value();
-		//odrv.SetPosSetpoint(odrvAxis, desiredPos);
-		//odrv.EnablePositionControlMode(odrvAxis);
-		//odrv.SetTorque(odrvAxis, 0.0);
+		float const desiredPos = estimate.value();
+		CanMessageBuffer * buf = CanInterface::ODrive::PrepareSimpleMessage(driver, CANSimple::MSG_SET_INPUT_POS, reply);
+		if (buf == nullptr)
+		{
+			return GCodeResult::error;
+		}
+		buf->dataLength = 8;
+		buf->remote = false;
+		memset(buf->msg.raw32, 0, buf->dataLength); // four last bytes are velocity and torque setpoints. Zero them.
+		memcpy(buf->msg.raw32, &desiredPos, sizeof(desiredPos));
+		CanInterface::SendPlainMessageNoFree(buf);
 
+		// Enable Position Control Mode
+		buf->id = CanInterface::ODrive::ArbitrationId(driver, CANSimple::MSG_SET_CONTROLLER_MODES);
+		buf->dataLength = 8;
+		buf->remote = false;
+		buf->msg.raw32[0] = CANSimple::CONTROL_MODE_POSITION_CONTROL;
+		buf->msg.raw32[1] = CANSimple::INPUT_MODE_PASSTHROUGH;
+		CanInterface::SendPlainMessageNoFree(buf);
 
+		CanMessageBuffer::Free(buf);
 		return GCodeResult::ok;
 	}
 	return GCodeResult::error;
@@ -950,6 +990,11 @@ GCodeResult HangprinterKinematics::SetODrive3TorqueMode(DriverId const driver, f
 	}
 	else
 	{
+		res = SetODrive3TorqueModeInner(driver, torque, reply);
+		if (res == GCodeResult::ok)
+		{
+			reply.catf("%.6f Nm, ", (double)torque);
+		}
 	}
 	return res;
 }
