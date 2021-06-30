@@ -875,12 +875,6 @@ std::optional<float> HangprinterKinematics::GetODrive3EncoderEstimate(DriverId c
 		if (ok)
 		{
 			encoderEstimate = LoadLEFloat(buf->msg.raw);
-			// Correct sign
-			if (!reprap.GetPlatform().GetDirectionValue(driver.localDriver))
-			{
-				encoderEstimate *= -1.0;
-			}
-			// See if we should insert estimate into cached reference positions
 			if (makeReference)
 			{
 				referencePositions[thisDriveIdx] = encoderEstimate;
@@ -916,7 +910,12 @@ GCodeResult HangprinterKinematics::ReadODrive3Encoder(DriverId const driver, GCo
 	std::optional<float> const estimate = GetODrive3EncoderEstimate(driver, gb.Seen('S'), reply, true);
 	if (estimate.has_value())
 	{
-		reply.catf("%.2f, ", (double)(estimate.value() * 360.0));
+		float directionCorrectedEncoderValue = estimate.value();
+		if (driver.boardAddress == 40 or driver.boardAddress == 41) // Driver direction is not stored on main board!! (will be in the future)
+		{
+			directionCorrectedEncoderValue *= -1.0;
+		}
+		reply.catf("%.2f, ", (double)(directionCorrectedEncoderValue * 360.0));
 		return GCodeResult::ok;
 	}
 	return GCodeResult::error;
@@ -994,7 +993,7 @@ GCodeResult HangprinterKinematics::SetODrive3TorqueMode(DriverId const driver, f
 	{
 		// Set the right sign
 		torque = std::abs(torque);
-		if (reprap.GetPlatform().GetDirectionValue(driver.localDriver))
+		if (driver.boardAddress == 42 or driver.boardAddress == 43) // Driver direction is not stored on main board!! (will be in the future)
 		{
 			torque = -torque;
 		}
