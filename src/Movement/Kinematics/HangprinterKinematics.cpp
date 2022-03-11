@@ -17,6 +17,12 @@
 
 #include <General/Portability.h>
 
+constexpr float DefaultAnchors[4][3] = {{    0.0, -2000.0, -100.0},
+                                        { 2000.0,  1000.0, -100.0},
+                                        {-2000.0,  1000.0, -100.0},
+                                        {    0.0,     0.0, 3000.0}};
+constexpr float DefaultPrintRadius = 1500.0;
+
 #if SUPPORT_OBJECT_MODEL
 
 // Object model table and functions
@@ -64,6 +70,45 @@ HangprinterKinematics::HangprinterKinematics() noexcept
 
 void HangprinterKinematics::Init() noexcept
 {
+  /* Naive buildup factor calculation (assumes cylindrical, straight line)
+	 * line diameter: 0.5 mm
+	 * spool height: 8.0 mm
+	 * (line_cross_section_area)/(height*pi): ((0.5/2)*(0.5/2)*pi)/(8.0*pi) = 0.0078 mm
+	 * Default buildup factor for 0.50 mm FireLine: 0.0078
+	 * Default buildup factor for 0.39 mm FireLine: 0.00475
+	 * In practice you might want to compensate a bit more or a bit less */
+	constexpr float DefaultSpoolBuildupFactor = 0.007;
+	/* Measure and set spool radii with M669 to achieve better accuracy */
+	constexpr float DefaultSpoolRadii[4] = { 75.0, 75.0, 75.0, 75.0}; // HP4 default
+	/* If axis runs lines back through pulley system, set mechanical advantage accordingly with M669 */
+	constexpr uint32_t DefaultMechanicalAdvantage[4] = { 2, 2, 2, 4}; // HP4 default
+	constexpr uint32_t DefaultLinesPerSpool[4] = { 1, 1, 1, 1}; // HP4 default
+	constexpr uint32_t DefaultMotorGearTeeth[4] = {  20,  20,  20,  20}; // HP4 default
+	constexpr uint32_t DefaultSpoolGearTeeth[4] = { 255, 255, 255, 255}; // HP4 default
+	constexpr uint32_t DefaultFullStepsPerMotorRev[4] = { 25, 25, 25, 25};
+	constexpr float DefaultMoverWeight_kg = 0.0F;          // Zero disables flex compensation feature.
+	constexpr float DefaultSpringKPerUnitLength = 20000.0F; // Garda 1.1 is somewhere in the range [20000, 100000]
+	constexpr float DefaultMinPlannedForce_Newton[4] = { 0.0F };
+	constexpr float DefaultMaxPlannedForce_Newton[4] = { 70.0F, 70.0F, 70.0F, 70.0F };
+	constexpr float DefaultGuyWireLengths[HANGPRINTER_AXES] = { -1.0F }; // If one of these are negative they will be calculated in Recalc() instead
+	constexpr float DefaultVerticalForce_Newton = 8.0F; // 8 chosen quite arbitrarily
+
+	ARRAY_INIT(anchors, DefaultAnchors);
+	printRadius = DefaultPrintRadius;
+	spoolBuildupFactor = DefaultSpoolBuildupFactor;
+	ARRAY_INIT(spoolRadii, DefaultSpoolRadii);
+	ARRAY_INIT(mechanicalAdvantage, DefaultMechanicalAdvantage);
+	ARRAY_INIT(linesPerSpool, DefaultLinesPerSpool);
+	ARRAY_INIT(motorGearTeeth, DefaultMotorGearTeeth);
+	ARRAY_INIT(spoolGearTeeth, DefaultSpoolGearTeeth);
+	ARRAY_INIT(fullStepsPerMotorRev, DefaultFullStepsPerMotorRev);
+	moverWeight_kg = DefaultMoverWeight_kg;
+	springKPerUnitLength = DefaultSpringKPerUnitLength;
+	ARRAY_INIT(minPlannedForce_Newton, DefaultMinPlannedForce_Newton);
+	ARRAY_INIT(maxPlannedForce_Newton, DefaultMaxPlannedForce_Newton);
+	ARRAY_INIT(guyWireLengths, DefaultGuyWireLengths);
+	verticalForce_Newton = DefaultVerticalForce_Newton;
+
 	Recalc();
 }
 
@@ -245,6 +290,7 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 			error = true;
 			return true;
 		}
+		gb.TryGetFValue('V', verticalForce_Newton, seen);
 		if (seen)
 		{
 			Recalc();
@@ -263,7 +309,8 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 				"S:Line stiffness %.2f\n"
 				"I:Min planned force %.1f, %.1f, %.1f, %.1f N\n"
 				"X:Max planned force %.1f, %.1f, %.1f, %.1f N\n"
-				"G:Guy wire lengths %.1f, %.1f, %.1f, %.1f",
+				"G:Guy wire lengths %.1f, %.1f, %.1f, %.1f\n"
+				"V:Vertical forces %.1f N",
 				(double)spoolBuildupFactor,
 				(double)spoolRadii[A_AXIS], (double)spoolRadii[B_AXIS], (double)spoolRadii[C_AXIS], (double)spoolRadii[D_AXIS],
 				(int)mechanicalAdvantage[A_AXIS], (int)mechanicalAdvantage[B_AXIS], (int)mechanicalAdvantage[C_AXIS], (int)mechanicalAdvantage[D_AXIS],
@@ -275,7 +322,8 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 				(double)springKPerUnitLength,
 				(double)minPlannedForce_Newton[A_AXIS], (double)minPlannedForce_Newton[B_AXIS], (double)minPlannedForce_Newton[C_AXIS], (double)minPlannedForce_Newton[D_AXIS],
 				(double)maxPlannedForce_Newton[A_AXIS], (double)maxPlannedForce_Newton[B_AXIS], (double)maxPlannedForce_Newton[C_AXIS], (double)maxPlannedForce_Newton[D_AXIS],
-				(double)guyWireLengths[A_AXIS], (double)guyWireLengths[B_AXIS], (double)guyWireLengths[C_AXIS], (double)guyWireLengths[D_AXIS]
+				(double)guyWireLengths[A_AXIS], (double)guyWireLengths[B_AXIS], (double)guyWireLengths[C_AXIS], (double)guyWireLengths[D_AXIS],
+				(double)verticalForce_Newton
 				);
 		}
 	}
@@ -522,9 +570,10 @@ bool HangprinterKinematics::WriteCalibrationParameters(FileStore *f) const noexc
 						ok = f->Write(scratchString.c_str());
 						if (ok)
 						{
-							scratchString.printf(" G%.1f:%.1f:%.1f:%.1f\n",
+							scratchString.printf(" G%.1f:%.1f:%.1f:%.1f V%.1f\n",
 								(double)guyWireLengths[A_AXIS], (double)guyWireLengths[B_AXIS],
-								(double)guyWireLengths[C_AXIS], (double)guyWireLengths[D_AXIS]
+								(double)guyWireLengths[C_AXIS], (double)guyWireLengths[D_AXIS],
+								(double)verticalForce_Newton
 							);
 							ok = f->Write(scratchString.c_str());
 						}
@@ -866,11 +915,10 @@ void HangprinterKinematics::StaticForces(float const machinePos[3], float F[4]) 
 
 		float D = 0.0F; // pre-determine D-force
 		if (dz > 0.0001) {
-			D = (mg + 8) / dz;
+			D = (mg + verticalForce_Newton) / dz;
 		}
-		// The D-forces' z-component is always equal to mg + 8.
-		// This means ABC-motors combined pull downwards 8 N.
-		// The number 8 was chosen quite arbitrarily.
+		// The D-forces' z-component is always equal to mg + verticalForce_Newton.
+		// This means ABC-motors combined pull downwards verticalForce_Newton N.
 		// I don't know if that's always solvable.
 		// Still, my tests show that we get very reasonable flex compensation...
 
