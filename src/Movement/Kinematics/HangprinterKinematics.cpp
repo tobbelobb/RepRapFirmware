@@ -285,7 +285,7 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 			error = true;
 			return true;
 		}
-		if (gb.TryGetFloatArray('G', HANGPRINTER_AXES, guyWireLengths, reply, seen))
+		if (gb.TryGetFloatArray('Y', HANGPRINTER_AXES, guyWireLengths, reply, seen))
 		{
 			error = true;
 			return true;
@@ -298,19 +298,19 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 		else
 		{
 			reply.printf(
-				"Q:Buildup fac %.4f\n"
-				"R:Spool r %.2f, %.2f, %.2f, %.2f\n"
-				"U:Mech Adv %d, %d, %d, %d\n"
-				"O:Lines/spool %d, %d, %d, %d\n"
-				"L:Motor gear teeth %d, %d, %d, %d\n"
-				"H:Spool gear teeth %d, %d, %d, %d\n"
-				"J:Full steps/rev %d, %d, %d, %d\n"
-				"W:Mover weight %.2f kg\n"
-				"S:Line stiffness %.2f\n"
-				"I:Min planned force %.1f, %.1f, %.1f, %.1f N\n"
-				"X:Max planned force %.1f, %.1f, %.1f, %.1f N\n"
-				"G:Guy wire lengths %.1f, %.1f, %.1f, %.1f\n"
-				"V:Vertical forces %.1f N",
+				"M666 Q%.4f\n"
+				"R%.2f:%.2f:%.2f:%.2f\n"
+				"U%d:%d:%d:%d\n"
+				"O%d:%d:%d:%d\n"
+				"L%d:%d:%d:%d\n"
+				"H%d:%d:%d:%d\n"
+				"J%d:%d:%d:%d\n"
+				"W%.2f\n"
+				"S%.2f\n"
+				"I%.1f:%.1f:%.1f:%.1f\n"
+				"X%.1f:%.1f:%.1f:%.1f\n"
+				"Y%.1f:%.1f:%.1f:%.1f\n"
+				"V%.1f",
 				(double)spoolBuildupFactor,
 				(double)spoolRadii[A_AXIS], (double)spoolRadii[B_AXIS], (double)spoolRadii[C_AXIS], (double)spoolRadii[D_AXIS],
 				(int)mechanicalAdvantage[A_AXIS], (int)mechanicalAdvantage[B_AXIS], (int)mechanicalAdvantage[C_AXIS], (int)mechanicalAdvantage[D_AXIS],
@@ -570,7 +570,7 @@ bool HangprinterKinematics::WriteCalibrationParameters(FileStore *f) const noexc
 						ok = f->Write(scratchString.c_str());
 						if (ok)
 						{
-							scratchString.printf(" G%.1f:%.1f:%.1f:%.1f V%.1f\n",
+							scratchString.printf(" Y%.1f:%.1f:%.1f:%.1f V%.1f\n",
 								(double)guyWireLengths[A_AXIS], (double)guyWireLengths[B_AXIS],
 								(double)guyWireLengths[C_AXIS], (double)guyWireLengths[D_AXIS],
 								(double)verticalForce_Newton
