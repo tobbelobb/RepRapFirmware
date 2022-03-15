@@ -1053,8 +1053,8 @@ void HangprinterKinematics::StaticForces(float const machinePos[3], float F[4]) 
 			A_pre = tmp_pre;
 		}
 
-		const float preFac = max(max(std::abs((targetForce_Newton - D_mg) / D_pre),
-		                             std::abs((targetForce_Newton - C_mg) / C_pre)),
+		// Make sure one of the ABC lines hits exactly the target force
+		const float preFac = max(std::abs((targetForce_Newton - C_mg) / C_pre),
 		                         max(std::abs((targetForce_Newton - B_mg) / B_pre),
 		                             std::abs((targetForce_Newton - A_mg) / A_pre)));
 
