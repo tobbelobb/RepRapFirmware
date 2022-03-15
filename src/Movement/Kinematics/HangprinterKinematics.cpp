@@ -91,7 +91,7 @@ void HangprinterKinematics::Init() noexcept
 	constexpr float DefaultMinPlannedForce_Newton[4] = { 0.0F };
 	constexpr float DefaultMaxPlannedForce_Newton[4] = { 70.0F, 70.0F, 70.0F, 70.0F };
 	constexpr float DefaultGuyWireLengths[HANGPRINTER_AXES] = { -1.0F }; // If one of these are negative they will be calculated in Recalc() instead
-	constexpr float DefaultVerticalForce_Newton = 8.0F; // 8 chosen quite arbitrarily
+	constexpr float DefaultTargetForce_Newton = 20.0F; // 20 chosen quite arbitrarily
 
 	ARRAY_INIT(anchors, DefaultAnchors);
 	printRadius = DefaultPrintRadius;
@@ -107,7 +107,7 @@ void HangprinterKinematics::Init() noexcept
 	ARRAY_INIT(minPlannedForce_Newton, DefaultMinPlannedForce_Newton);
 	ARRAY_INIT(maxPlannedForce_Newton, DefaultMaxPlannedForce_Newton);
 	ARRAY_INIT(guyWireLengths, DefaultGuyWireLengths);
-	verticalForce_Newton = DefaultVerticalForce_Newton;
+	targetForce_Newton = DefaultTargetForce_Newton;
 
 	Recalc();
 }
@@ -290,7 +290,7 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 			error = true;
 			return true;
 		}
-		gb.TryGetFValue('V', verticalForce_Newton, seen);
+		gb.TryGetFValue('T', targetForce_Newton, seen);
 		if (seen)
 		{
 			Recalc();
@@ -310,7 +310,7 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 				"I%.1f:%.1f:%.1f:%.1f\n"
 				"X%.1f:%.1f:%.1f:%.1f\n"
 				"Y%.1f:%.1f:%.1f:%.1f\n"
-				"V%.1f",
+				"T%.1f",
 				(double)spoolBuildupFactor,
 				(double)spoolRadii[A_AXIS], (double)spoolRadii[B_AXIS], (double)spoolRadii[C_AXIS], (double)spoolRadii[D_AXIS],
 				(int)mechanicalAdvantage[A_AXIS], (int)mechanicalAdvantage[B_AXIS], (int)mechanicalAdvantage[C_AXIS], (int)mechanicalAdvantage[D_AXIS],
@@ -323,7 +323,7 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 				(double)minPlannedForce_Newton[A_AXIS], (double)minPlannedForce_Newton[B_AXIS], (double)minPlannedForce_Newton[C_AXIS], (double)minPlannedForce_Newton[D_AXIS],
 				(double)maxPlannedForce_Newton[A_AXIS], (double)maxPlannedForce_Newton[B_AXIS], (double)maxPlannedForce_Newton[C_AXIS], (double)maxPlannedForce_Newton[D_AXIS],
 				(double)guyWireLengths[A_AXIS], (double)guyWireLengths[B_AXIS], (double)guyWireLengths[C_AXIS], (double)guyWireLengths[D_AXIS],
-				(double)verticalForce_Newton
+				(double)targetForce_Newton
 				);
 		}
 	}
@@ -570,10 +570,10 @@ bool HangprinterKinematics::WriteCalibrationParameters(FileStore *f) const noexc
 						ok = f->Write(scratchString.c_str());
 						if (ok)
 						{
-							scratchString.printf(" Y%.1f:%.1f:%.1f:%.1f V%.1f\n",
+							scratchString.printf(" Y%.1f:%.1f:%.1f:%.1f T%.1f\n",
 								(double)guyWireLengths[A_AXIS], (double)guyWireLengths[B_AXIS],
 								(double)guyWireLengths[C_AXIS], (double)guyWireLengths[D_AXIS],
-								(double)verticalForce_Newton
+								(double)targetForce_Newton
 							);
 							ok = f->Write(scratchString.c_str());
 						}
@@ -913,12 +913,14 @@ void HangprinterKinematics::StaticForces(float const machinePos[3], float F[4]) 
 		float dy = (anchors[D_AXIS][1] - machinePos[1])/normD;
 		float dz = (anchors[D_AXIS][2] - machinePos[2])/normD;
 
-		float D = 0.0F; // pre-determine D-force
+		float D_mg = 0.0F;
+		float D_pre = 0.0F;
 		if (dz > 0.0001) {
-			D = (mg + verticalForce_Newton) / dz;
+			D_mg = mg / dz;
+			D_pre = targetForce_Newton;
 		}
-		// The D-forces' z-component is always equal to mg + verticalForce_Newton.
-		// This means ABC-motors combined pull downwards verticalForce_Newton N.
+		// The D-forces' z-component is always equal to mg + targetForce_Newton.
+		// This means ABC-motors combined pull downwards targetForce_Newton N.
 		// I don't know if that's always solvable.
 		// Still, my tests show that we get very reasonable flex compensation...
 
@@ -946,11 +948,12 @@ void HangprinterKinematics::StaticForces(float const machinePos[3], float F[4]) 
 		// y = -D*dy     .
 		//     -D*dz + mg
 		//
-		float const yx = -D*dx;
-		float const yy = -D*dy;
-		float const yz = -D*dz + mg;
-
-		// Some code in RRFLibraries/src/Math/Matrix.h seem to do Gaussian substitution already.
+		float const yx_mg = -D_mg*dx;
+		float const yy_mg = -D_mg*dy;
+		float const yz_mg = -D_mg*dz + mg;
+		float const yx_pre = -D_pre*dx;
+		float const yy_pre = -D_pre*dy;
+		float const yz_pre = -D_pre*dz;
 
 		// Start with saving us from dividing by zero during Gaussian substitution
 		float constexpr eps = 0.00001;
@@ -966,7 +969,7 @@ void HangprinterKinematics::StaticForces(float const machinePos[3], float F[4]) 
 			ay = tmpy;
 			az = tmpz;
 		}
-		bool const divZero1 = std::abs(by - (bx / ax) * ay) < eps;
+		bool const divZero1 = (std::abs(by - (bx / ax) * ay) < eps);
 		if (divZero1) {
 			float const tmpx = cx;
 			float const tmpy = cy;
@@ -991,49 +994,79 @@ void HangprinterKinematics::StaticForces(float const machinePos[3], float F[4]) 
 			cz = tmpz;
 		}
 
-		// Solving the system by Gaussian substitution
+		// Solving the two systems by Gaussian substitution
 		float const q0 = bx / ax;
 		float const q1 = cx / ax;
-		float const q2 = yx / ax;
+		float const q2_mg = yx_mg / ax;
+		float const q2_pre = yx_pre / ax;
 		float const q3 = by - q0 * ay;
 		float const q4 = cy - q1 * ay;
-		float const q5 = yy - q2 * ay;
+		float const q5_mg = yy_mg - q2_mg * ay;
+		float const q5_pre = yy_pre - q2_pre * ay;
 		float const q6 = bz - q0 * az;
 		float const q7 = cz - q1 * az;
-		float const q8 = yz - q2 * az;
+		float const q8_mg = yz_mg - q2_mg * az;
+		float const q8_pre = yz_pre - q2_pre * az;
 		float const q9 = q4 / q3;
-		float const q10 = q5 / q3;
+		float const q10_mg = q5_mg / q3;
+		float const q10_pre = q5_pre / q3;
 		float const q11 = q7 - q9 * q6;
-		float const q12 = q8 - q10 * q6;
-		float const q13 = q12 / q11;
-		float const q14 = q10 - q13 * q9;
-		float const q15 = q2 - q13 * q1;
+		float const q12_mg = q8_mg - q10_mg * q6;
+		float const q12_pre = q8_pre - q10_pre * q6;
+		float const q13_mg = q12_mg / q11;
+		float const q13_pre = q12_pre / q11;
+		float const q14_mg = q10_mg - q13_mg * q9;
+		float const q14_pre = q10_pre - q13_pre * q9;
+		float const q15_mg = q2_mg - q13_mg * q1;
+		float const q15_pre = q2_pre - q13_pre * q1;
 
-		// Size of the three undetermined forces
-		float A = q15 - q14 * q0;
-		float B = q14;
-		float C = q13;
+		// Size of the undetermined forces
+		float A_mg = q15_mg - q14_mg * q0;
+		float A_pre = q15_pre - q14_pre * q0;
+		float B_mg = q14_mg;
+		float B_pre = q14_pre;
+		float C_mg = q13_mg;
+		float C_pre = q13_pre;
 
 		if (divZero2) {
-			float const tmp = A;
-			A = C;
-			C = tmp;
+			float const tmp_mg = A_mg;
+			A_mg = C_mg;
+			C_mg = tmp_mg;
+			float const tmp_pre = A_pre;
+			A_pre = C_pre;
+			C_pre = tmp_pre;
 		}
 		if (divZero1) {
-			float const tmp = C;
-			C = B;
-			B = tmp;
+			float const tmp_mg = C_mg;
+			C_mg = B_mg;
+			B_mg = tmp_mg;
+			float const tmp_pre = C_pre;
+			C_pre = B_pre;
+			B_pre = tmp_pre;
 		}
 		if (divZero0) {
-			float const tmp = B;
-			B = A;
-			A = tmp;
+			float const tmp_mg = B_mg;
+			B_mg = A_mg;
+			A_mg = tmp_mg;
+			float const tmp_pre = B_pre;
+			B_pre = A_pre;
+			A_pre = tmp_pre;
 		}
 
-		F[0] = min(max(A, minPlannedForce_Newton[A_AXIS]), maxPlannedForce_Newton[A_AXIS]);
-		F[1] = min(max(B, minPlannedForce_Newton[B_AXIS]), maxPlannedForce_Newton[B_AXIS]);
-		F[2] = min(max(C, minPlannedForce_Newton[C_AXIS]), maxPlannedForce_Newton[C_AXIS]);
-		F[3] = min(max(D, minPlannedForce_Newton[D_AXIS]), maxPlannedForce_Newton[D_AXIS]);
+		const float preFac = max(max(std::abs((targetForce_Newton - D_mg) / D_pre),
+		                             std::abs((targetForce_Newton - C_mg) / C_pre)),
+		                         max(std::abs((targetForce_Newton - B_mg) / B_pre),
+		                             std::abs((targetForce_Newton - A_mg) / A_pre)));
+
+		float const A_tot = A_mg + preFac * A_pre;
+		float const B_tot = B_mg + preFac * B_pre;
+		float const C_tot = C_mg + preFac * C_pre;
+		float const D_tot = D_mg + preFac * D_pre;
+
+		F[0] = min(max(A_tot, minPlannedForce_Newton[A_AXIS]), maxPlannedForce_Newton[A_AXIS]);
+		F[1] = min(max(B_tot, minPlannedForce_Newton[B_AXIS]), maxPlannedForce_Newton[B_AXIS]);
+		F[2] = min(max(C_tot, minPlannedForce_Newton[C_AXIS]), maxPlannedForce_Newton[C_AXIS]);
+		F[3] = min(max(D_tot, minPlannedForce_Newton[D_AXIS]), maxPlannedForce_Newton[D_AXIS]);
 	}
 }
 

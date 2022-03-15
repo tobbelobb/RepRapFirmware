@@ -65,7 +65,7 @@ private:
 
 	void PrintParameters(const StringRef& reply) const noexcept;			// Print all the parameters for debugging
 
-  // The real defaults are in the cpp file
+	// The real defaults are in the cpp file
 	float printRadius = 0.0F;
 	float anchors[HANGPRINTER_AXES][3] = {{ 0.0, 0.0, 0.0},
 	                                      { 0.0, 0.0, 0.0},
@@ -90,7 +90,7 @@ private:
 	float minPlannedForce_Newton[HANGPRINTER_AXES] = { 0.0F };
 	float maxPlannedForce_Newton[HANGPRINTER_AXES] = { 0.0F };
 	float guyWireLengths[HANGPRINTER_AXES] = { 0.0F };
-	float verticalForce_Newton = 0.0F;
+	float targetForce_Newton = 0.0F;
 
 	// Derived parameters
 	float k0[HANGPRINTER_AXES] = { 0.0F };
