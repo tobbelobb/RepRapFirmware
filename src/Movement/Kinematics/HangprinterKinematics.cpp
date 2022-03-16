@@ -1053,20 +1053,22 @@ void HangprinterKinematics::StaticForces(float const machinePos[3], float F[4]) 
 			A_pre = tmp_pre;
 		}
 
-		// Make sure one of the ABC lines hits exactly the target force
-		const float preFac = max(std::abs((targetForce_Newton - C_mg) / C_pre),
-		                         max(std::abs((targetForce_Newton - B_mg) / B_pre),
-		                             std::abs((targetForce_Newton - A_mg) / A_pre)));
+		// Assure at least targetForce in the ABC lines (first argument to outer min()),
+		// and that no line get more than max planned force (second argument to outer min()).
+		float const preFac = min(max(std::abs((targetForce_Newton - C_mg) / C_pre),
+		                             max(std::abs((targetForce_Newton - B_mg) / B_pre), std::abs((targetForce_Newton - A_mg) / A_pre))),
+		                         min(min(std::abs((maxPlannedForce_Newton[A_AXIS] - A_mg) / A_pre), std::abs((maxPlannedForce_Newton[B_AXIS] - B_mg) / B_pre)),
+		                             min(std::abs((maxPlannedForce_Newton[C_AXIS] - C_mg) / C_pre), std::abs((maxPlannedForce_Newton[D_AXIS] - D_mg) / D_pre))));
 
 		float const A_tot = A_mg + preFac * A_pre;
 		float const B_tot = B_mg + preFac * B_pre;
 		float const C_tot = C_mg + preFac * C_pre;
 		float const D_tot = D_mg + preFac * D_pre;
 
-		F[0] = min(max(A_tot, minPlannedForce_Newton[A_AXIS]), maxPlannedForce_Newton[A_AXIS]);
-		F[1] = min(max(B_tot, minPlannedForce_Newton[B_AXIS]), maxPlannedForce_Newton[B_AXIS]);
-		F[2] = min(max(C_tot, minPlannedForce_Newton[C_AXIS]), maxPlannedForce_Newton[C_AXIS]);
-		F[3] = min(max(D_tot, minPlannedForce_Newton[D_AXIS]), maxPlannedForce_Newton[D_AXIS]);
+		F[0] = max(A_tot, minPlannedForce_Newton[A_AXIS]);
+		F[1] = max(B_tot, minPlannedForce_Newton[B_AXIS]);
+		F[2] = max(C_tot, minPlannedForce_Newton[C_AXIS]);
+		F[3] = max(D_tot, minPlannedForce_Newton[D_AXIS]);
 	}
 }
 
