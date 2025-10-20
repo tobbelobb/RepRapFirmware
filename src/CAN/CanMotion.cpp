@@ -13,6 +13,7 @@
 #include <CanMessageFormats.h>
 #include "CanInterface.h"
 #include <Platform/Platform.h>
+#include <Platform/RepRap.h>
 #include <GCodes/GCodes.h>
 #include <Movement/Move.h>
 #include <General/FreelistManager.h>
@@ -365,6 +366,17 @@ bool CanMotion::StopDriverWhenExecuting(DriverId driver, int32_t netStepsTaken) 
 // Revert any stopped drivers that we haven't already and return true when there are no drivers to revert
 bool CanMotion::RevertStoppedDrivers() noexcept
 {
+#if RRF_HOST_BUILD
+	if (stopList == nullptr)
+	{
+		// Nothing to do, so don't block any waiting state machines
+		revertAll = false;
+		revertedAll = true;
+		whenRevertedAll = millis();
+		return true;
+	}
+#endif
+
 	if (!revertAll && !revertedAll)							// if not started reverting yet
 	{
 		revertAll = true;

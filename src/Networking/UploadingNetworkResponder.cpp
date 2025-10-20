@@ -9,6 +9,10 @@
 #include "Socket.h"
 #include <Platform/Platform.h>
 
+#if HAS_MASS_STORAGE
+# include <Storage/MassStorage.h>
+#endif
+
 UploadingNetworkResponder::UploadingNetworkResponder(NetworkResponder *_ecv_from _ecv_null n) noexcept : NetworkResponder(n)
 #if HAS_MASS_STORAGE
 	, uploadError(false), dummyUpload(false)
@@ -91,7 +95,7 @@ void UploadingNetworkResponder::FinishUpload(uint32_t fileLength, time_t fileLas
 		if (fileLength != 0 && fileBeingUploaded.Length() != fileLength)
 		{
 			uploadError = true;
-			GetPlatform().MessageF(ErrorMessage, "Uploaded file size is different (%lu vs. expected %lu bytes)\n", fileBeingUploaded.Length(), fileLength);
+			GetPlatform().MessageF(ErrorMessage, "Uploaded file size is different (%u vs. expected %u bytes)\n", fileBeingUploaded.Length(), fileLength);
 		}
 		else if (gotCrc && expectedCrc != fileBeingUploaded.GetCrc32())
 		{

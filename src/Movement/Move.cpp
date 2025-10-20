@@ -890,6 +890,15 @@ bool Move::WaitingForAllMovesFinished(MovementSystemNumber msNumber
 		return false;
 	}
 
+#if RRF_HOST_BUILD
+	// In host simulation, moves are "finished" when the ring is empty
+	// No need to check for physical drive motion since we're not on real hardware
+	(void)msNumber;  // Suppress unused parameter warning
+#if SUPPORT_ASYNC_MOVES
+	(void)logicalDrivesOwned;
+#endif
+	return true;
+#else
 	// If input shaping is enabled then movement may continue for a little while longer
 #if SUPPORT_ASYNC_MOVES
 	return logicalDrivesOwned.IterateWhile([this](unsigned int axisOrExtruder, unsigned int) noexcept -> bool
@@ -907,6 +916,7 @@ bool Move::WaitingForAllMovesFinished(MovementSystemNumber msNumber
 	}
 #endif
 	return true;
+#endif
 }
 
 // Return the number of actually probed probe points
@@ -1062,7 +1072,7 @@ void Move::Diagnostics(unsigned int part, const StringRef& reply) noexcept
 		// Show the driver diagnostics. We can fit 4 in each response. Duet 2 has 12 drivers so we need up to 3 responses.
 		for (size_t drive = 4 * (part - 1); drive < min<size_t>(NumDirectDrivers, 4 * part); ++drive)
 		{
-			reply.lcatf("Driver %u: ", drive);
+			reply.lcatf("Driver %zu: ", drive);
 #ifdef DUET3_MB6XD
 			reply.cat((HasDriverError(drive)) ? "error" : "ok");
 #elif HAS_SMART_DRIVERS
@@ -2244,6 +2254,55 @@ void Move::AddLinearSegments(size_t logicalDrive, uint32_t startTime, const Prep
 		}
 	}		// End of boosted base priority section
 }
+
+
+#if RRF_HOST_BUILD
+// On host (CAN capture), virtual time advances much faster than real time, so the ISR can't keep up
+// We must manually free segments that are in the past to prevent memory leak and O(n²) slowdown
+// Parameter 'beforeTime': Only free segments that ended before this time
+void Move::FreeOldSegments(const uint32_t beforeTime) noexcept
+{
+	// Iterate through all drives and free segments that have finished
+	for (size_t drive = 0; drive < MaxAxesPlusExtruders; ++drive)
+	{
+		DriveMovement& dm = dms[drive];
+		MoveSegment *seg = dm.segments;
+		MoveSegment *prev = nullptr;
+
+		// Walk the segment list and free completed segments
+		// Since segments are ordered by time, we can stop at the first non-expired segment
+		while (seg != nullptr)
+		{
+			const uint32_t segEndTime = seg->GetStartTime() + seg->GetDuration();
+
+			// If this segment finished before our cutoff time
+			if ((int32_t)(beforeTime - segEndTime) >= 0)
+			{
+				MoveSegment *toFree = seg;
+				seg = seg->GetNext();
+
+				// Unlink from list
+				if (prev == nullptr)
+				{
+					dm.segments = seg;
+				}
+				else
+				{
+					prev->SetNext(seg);
+				}
+
+				// Free the segment
+				MoveSegment::Release(toFree);
+			}
+			else
+			{
+				// This segment hasn't finished yet; since list is time-ordered, all remaining segments are also not finished
+				break;
+			}
+		}
+	}
+}
+#endif
 
 // Return true if none of the drives passed has any movement pending
 bool Move::AreDrivesStopped(LogicalDrivesBitmap drives) const noexcept

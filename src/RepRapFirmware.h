@@ -191,7 +191,7 @@ inline volatile uint32_t *GetStackOffset(uint32_t dwordOffset) noexcept
 // Functions to set and clear data watchpoints
 inline void SetWatchpoint(uint8_t number, const void* addr, unsigned int addrBits = 2) noexcept
 {
-#ifndef __ECV__		// this uses messy pointer arithmetic on a non-array, so eCv understandable doesn't like it
+#if !defined(__ECV__) && !defined(RRF_HOST_BUILD)		// this uses messy pointer arithmetic on a non-array, so eCv understandable doesn't like it
 	CoreDebug->DEMCR = CoreDebug_DEMCR_TRCENA_Msk | CoreDebug_DEMCR_MON_EN_Msk;		// enable tracing and debug interrupt
 	volatile uint32_t *const _ecv_array watchpointRegs = &(DWT->COMP0);				// 4 groups of (COMP, MASK, FUNCTION, reserved)
 	watchpointRegs[4 * number] = reinterpret_cast<uint32_t>(addr);					// set COMP register
@@ -202,7 +202,7 @@ inline void SetWatchpoint(uint8_t number, const void* addr, unsigned int addrBit
 
 inline void ClearWatchpoint(uint8_t number) noexcept
 {
-#ifndef __ECV__		// this uses messy pointer arithmetic on a non-array, so eCv understandable doesn't like it
+#if !defined(__ECV__) && !defined(RRF_HOST_BUILD)		// this uses messy pointer arithmetic on a non-array, so eCv understandable doesn't like it
 	volatile uint32_t *const _ecv_array watchpointRegs = &(DWT->COMP0);						// 4 groups of (COMP, MASK, FUNCTION, reserved)
 	watchpointRegs[4 * number + 2] = 0;
 #endif

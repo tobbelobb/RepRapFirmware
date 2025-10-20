@@ -30,6 +30,7 @@
 #include <General/SafeVsnprintf.h>
 #include <Platform/MessageType.h>
 #include <Platform/PrintPausedReason.h>
+#include <Platform/Platform.h>
 
 class VariableSet;
 class CanMessageEvent;

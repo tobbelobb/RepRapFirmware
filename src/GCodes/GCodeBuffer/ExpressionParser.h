@@ -11,6 +11,7 @@
 #include <RepRapFirmware.h>
 #include <ObjectModel/ObjectModel.h>
 #include <GCodes/GCodeException.h>
+#include <Storage/FileStore.h>
 
 class VariableSet;
 

@@ -14,7 +14,9 @@
 #include <ObjectModel/ObjectModel.h>
 #include <General/NamedEnum.h>
 
-#if defined(DUET3_MB6HC) && HAS_WIFI_NETWORKING
+#if RRF_HOST_BUILD
+const size_t MaxNetworkInterfaces = 1;
+#elif defined(DUET3_MB6HC) && HAS_WIFI_NETWORKING
 const size_t MaxNetworkInterfaces = 2;
 #elif defined(DUET3_MB6HC) || defined(DUET3_MB6XD) || defined(DUET_NG) || defined(DUET_M) || defined(PCCB) || defined(DUET3MINI)
 const size_t MaxNetworkInterfaces = 1;
@@ -22,7 +24,10 @@ const size_t MaxNetworkInterfaces = 1;
 # error Wrong Network.h file included
 #endif
 
-#if SAME70
+#if RRF_HOST_BUILD
+const size_t NumHttpResponders = 2;      // host HTTP responders
+const size_t NumTelnetResponders = 0;    // Telnet is disabled in host mode
+#elif SAME70
 const size_t NumHttpResponders = 6;		// the number of concurrent HTTP requests we can process
 const size_t NumTelnetResponders = 2;	// the number of concurrent Telnet sessions we support
 #else

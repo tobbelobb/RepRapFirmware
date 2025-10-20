@@ -455,6 +455,11 @@ static inline motioncalc_t fastLimSqrtm(motioncalc_t f) noexcept
 // Notify a step error. This always returns false so that CalcNextStepTimeFull can tail-chain to it.
 bool DriveMovement::LogStepError(uint8_t type, float info, const MoveSegment *seg) noexcept
 {
+#if RRF_HOST_BUILD
+	(void)type;
+	(void)info;
+	(void)seg;
+#else
 	const StringRef& dbgRef = Platform::genericDebugBuffer.GetRef();
 	const char c = (drive < reprap.GetGCodes().GetTotalAxes()) ? reprap.GetGCodes().GetAxisLetters()[drive]
 															   : (char)('0' + LogicalDriveToExtruder(drive));
@@ -464,6 +469,7 @@ bool DriveMovement::LogStepError(uint8_t type, float info, const MoveSegment *se
 		seg->AppendDetails(dbgRef);
 	}
 	dbgRef.cat('\n');
+#endif
 	Platform::shouldTurnOffHeaters = true;
 	Platform::hasGenericDebug = true;
 	reprap.GetMove().StepErrorHalt();

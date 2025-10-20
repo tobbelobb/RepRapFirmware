@@ -18,6 +18,10 @@
 #include <GCodes/GCodeBuffer/GCodeBuffer.h>
 #include <Tools/Tool.h>
 
+#if RRF_HOST_BUILD
+# include <HostTiming.h>
+#endif
+
 #if SUPPORT_CAN_EXPANSION
 # include "CAN/CanMotion.h"
 #endif
@@ -117,7 +121,7 @@ GCodeResult DDARing::ConfigureMovementQueue(GCodeBuffer& gb, const StringRef& re
 			const ptrdiff_t memoryAvailable = Tasks::GetNeverUsedRam();
 			if (memoryNeeded >= memoryAvailable)
 			{
-				reply.printf("insufficient RAM (available %d, needed %" PRIu64 ")", memoryAvailable, memoryNeeded);
+				reply.printf("insufficient RAM (available %td, needed %" PRIu64 ")", memoryAvailable, memoryNeeded);
 				return GCodeResult::error;
 			}
 
@@ -243,6 +247,11 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 		// See if we can retire any completed moves
 		while (cdda->IsCommitted() && cdda->HasExpired())
 		{
+#if RRF_HOST_BUILD
+			const uint32_t clocksNeeded = cdda->GetClocksNeeded();
+			simulationTime += (float)clocksNeeded * (1.0/StepClockRate);
+			HostTiming::ReportSimulationClocks(clocksNeeded);
+#endif
 			++completedMoves;
 			//debugPrintf("Retiring move: now=%" PRIu32 " start=%" PRIu32 " dur=%" PRIu32 "\n", StepTimer::GetMovementTimerTicks(), cdda->GetMoveStartTime(), cdda->GetClocksNeeded());
 			if (cdda->Free())
@@ -280,6 +289,17 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 			ret = MoveTiming::StandardMoveWakeupInterval;
 		}
 
+#if RRF_HOST_BUILD
+		{
+			HostTiming::ClockTagScope clockScope(HostTiming::ClockStatKind::Simulation);
+			HostTiming::AdvanceStepClocks(1000);
+			// On host, the ISR can't keep up with virtual time advancement
+			// Segments accumulate in memory faster than they're freed, causing O(n²) slowdown
+			// We therefore free old segments that ended before the current time
+			reprap.GetMove().FreeOldSegments(StepTimer::GetMovementTimerTicks());
+		}
+#endif
+
 		if (simulationMode != SimulationMode::off)
 		{
 			return 0;
@@ -300,7 +320,6 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 				return moveTime;
 			}
 		}
-
 		return ret;
 	}
 
@@ -310,7 +329,14 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 		|| cdda->IsIsolatedMove()									// ...or checking endstops or another isolated move, so we can't schedule the following move
 	   )
 	{
-		const uint32_t ret = PrepareMoves(cdda, prepareAdvanceTime, 0, simulationMode);
+		if (!cdda->IsCommitted() && cdda->IsProvisional() && shouldStartMove) {
+			static int drains = 0;
+			drains++;
+			if (drains > 1) {
+				debugPrintf("Queue drained - starting first move after empty period.\n");
+			}
+		}
+		const uint32_t ret = PrepareMoves(cdda, prepareAdvanceTime, 0, 0, simulationMode);
 		if (cdda->IsCommitted())
 		{
 			if (simulationMode != SimulationMode::off)
@@ -337,6 +363,13 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 		}
 		return ret;
 	}
+#if RRF_HOST_BUILD
+	if (!cdda->IsCommitted() && cdda->IsProvisional())
+	{
+		HostTiming::AdvanceStepClocks(10);
+		HostTiming::ReportSimulationClocks(10);
+	}
+#endif
 
 	return (cdda->IsProvisional())
 			? MoveStartPollInterval									// there are moves in the queue but it is not time to prepare them yet

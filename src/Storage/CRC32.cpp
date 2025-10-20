@@ -1,6 +1,7 @@
 // CRC-32 generation class methods
 
 #include "CRC32.h"
+#include <cstdint>
 
 #if USE_SAME5x_HARDWARE_CRC
 
@@ -259,7 +260,7 @@ void CRC32::Update(const char *_ecv_array s, size_t len) noexcept
 		uint32_t locCrc = crc;
 
 		// Process any bytes at the start until we reach a dword boundary
-		while ((reinterpret_cast<uint32_t>(s) & 3) != 0 && s != end)
+		while ((reinterpret_cast<std::uintptr_t>(s) & 3u) != 0 && s != end)
 		{
 			locCrc = (CRC_32_TAB[(locCrc ^ (uint8_t)*s++) & 0xFF] ^ (locCrc >> 8));
 		}

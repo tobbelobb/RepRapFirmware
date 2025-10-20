@@ -16,6 +16,10 @@
 #include <Movement/StepTimer.h>
 #include <Platform/TaskPriorities.h>
 
+#if RRF_HOST_BUILD
+# include <networking/NetworkInterfaceHost.h>
+#endif
+
 #if HAS_NETWORKING
 # include "NetworkClient.h"
 # include "NetworkBuffer.h"
@@ -96,7 +100,9 @@ Network::Network(Platform& p) noexcept : platform(p)
 #endif
 {
 #if HAS_NETWORKING
-# if defined(DUET3_MB6HC) || defined(DUET3_MB6XD)
+# if RRF_HOST_BUILD
+	interfaces[0] = new NetworkInterfaceHost(p);
+# elif defined(DUET3_MB6HC) || defined(DUET3_MB6XD)
 	interfaces[0] = new LwipEthernetInterface(p);
 # elif defined(DUET_NG) || defined(DUET3MINI_V04)
 	interfaces[0] = nullptr;			// we set this up in Init()

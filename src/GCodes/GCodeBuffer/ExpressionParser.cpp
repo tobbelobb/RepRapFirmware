@@ -10,6 +10,8 @@
 #include "GCodeBuffer.h"
 #include <Platform/RepRap.h>
 #include <Platform/Platform.h>
+#include <Storage/MassStorage.h>
+#include <Storage/FileStore.h>
 #include <General/NamedEnum.h>
 #include <General/NumericConverter.h>
 #include <Hardware/ExceptionHandlers.h>

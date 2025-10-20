@@ -36,7 +36,9 @@
  * The only format specifiers currently used by RepRapFirmware are: YmdHMS
  */
 
+#if !defined(_GNU_SOURCE)
 #define _GNU_SOURCE
+#endif
 #include <ecv_duet3d.h>
 #include <stddef.h>
 #include <time.h>

@@ -78,10 +78,10 @@ constexpr ObjectModelTableEntry PrintMonitor::objectModelTable[] =
 	// TODO Add enum about the last file print here (to replace lastFileAborted, lastFileCancelled, lastFileSimulated)
 	{ "layer",				OBJECT_MODEL_FUNC_IF(self->IsPrinting() && self->currentLayer != 0, (int32_t)self->currentLayer), 					ObjectModelEntryFlags::liveNotPanelDue },
 	{ "layerTime",			OBJECT_MODEL_FUNC_IF(self->IsPrinting() && self->currentLayer != 0, self->GetCurrentLayerTime(), 1), 				ObjectModelEntryFlags::liveNotPanelDue },
-	{ "pauseDuration",		OBJECT_MODEL_FUNC_IF(self->IsPrinting(), lrintf(self->GetPauseDuration())),											ObjectModelEntryFlags::liveNotPanelDue },
+	{ "pauseDuration",		OBJECT_MODEL_FUNC_IF(self->IsPrinting(), static_cast<int32_t>(lrintf(self->GetPauseDuration()))),					ObjectModelEntryFlags::liveNotPanelDue },
 	{ "rawExtrusion",		OBJECT_MODEL_FUNC_IF(self->IsPrinting(), ExpressionValue(self->gCodes.GetTotalRawExtrusion(), 1)),					ObjectModelEntryFlags::liveNotPanelDue },
 	{ "timesLeft",			OBJECT_MODEL_FUNC(self, 3),							 																ObjectModelEntryFlags::live },
-	{ "warmUpDuration",		OBJECT_MODEL_FUNC_IF(self->IsPrinting(), lrintf(self->GetWarmUpDuration())),										ObjectModelEntryFlags::live },
+	{ "warmUpDuration",		OBJECT_MODEL_FUNC_IF(self->IsPrinting(), static_cast<int32_t>(lrintf(self->GetWarmUpDuration()))),				ObjectModelEntryFlags::live },
 
 	// 1. 'file' members
 	{ "customInfo",			OBJECT_MODEL_FUNC(&self->customInfo, 0),						 													ObjectModelEntryFlags::none },
@@ -117,7 +117,7 @@ DEFINE_GET_OBJECT_MODEL_TABLE(PrintMonitor)
 
 int32_t PrintMonitor::GetPrintOrSimulatedDuration() const noexcept
 {
-	return lrintf((gCodes.IsSimulating()) ? gCodes.GetSimulationTime() + reprap.GetMove().GetSimulationTime() : GetPrintDuration());
+	return static_cast<int32_t>(lrintf((gCodes.IsSimulating()) ? gCodes.GetSimulationTime() + reprap.GetMove().GetSimulationTime() : GetPrintDuration()));
 }
 
 PrintMonitor::PrintMonitor(Platform& p, GCodes& gc) noexcept : platform(p), gCodes(gc), lastWarmUpDuration(0), isPrinting(false), heatingUp(false), paused(false), printingFileParsed(false)
@@ -462,7 +462,7 @@ float PrintMonitor::EstimateTimeLeft(PrintEstimationMethod method) const noexcep
 ExpressionValue PrintMonitor::EstimateTimeLeftAsExpression(PrintEstimationMethod method) const noexcept
 {
 	const float timeLeft = EstimateTimeLeft(method);
-	return (timeLeft > 0.0) ? ExpressionValue(lrintf(timeLeft)) : ExpressionValue(nullptr);
+	return (timeLeft > 0.0) ? ExpressionValue(static_cast<int32_t>(lrintf(timeLeft))) : ExpressionValue(nullptr);
 }
 
 // Return the estimated time until user interaction is required e.g. to change filament
@@ -474,7 +474,7 @@ ExpressionValue PrintMonitor::EstimateTimeToPause() const noexcept
 		const float timeToPause = slicerTimeToPause - (millis64() - whenSlicerTimeToPauseSet) * MillisToSeconds;
 		if (timeToPause > 0.0)
 		{
-			ret.SetInt(lrintf(timeToPause));
+			ret.SetInt(static_cast<int32_t>(lrintf(timeToPause)));
 		}
 	}
 	return ret;
