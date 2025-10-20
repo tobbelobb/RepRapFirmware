@@ -1160,7 +1160,7 @@ void RepRap::ReportDebugSettings(const StringRef& reply) noexcept
 	{
 		if (debugMaps[i].IsNonEmpty())
 		{
-			reply.catf(" %s(%u - %#" PRIx16 ")", Module(i).ToString(), i, debugMaps[i].GetRaw());
+			reply.catf(" %s(%u - %#" PRIx16 ")", Module(i).ToString(), static_cast<unsigned int>(i), debugMaps[i].GetRaw());
 		}
 	}
 
@@ -1169,7 +1169,7 @@ void RepRap::ReportDebugSettings(const StringRef& reply) noexcept
 	{
 		if (debugMaps[i].IsEmpty())
 		{
-			reply.catf(" %s(%u)", Module(i).ToString(), i);
+			reply.catf(" %s(%u)", Module(i).ToString(), static_cast<unsigned int>(i));
 		}
 	}
 }
@@ -1991,7 +1991,10 @@ OutputBuffer *_ecv_null RepRap::GetLegacyStatusResponse(uint8_t type, int seq) c
 	{
 		// Add the static fields
 		response->catf(",\"geometry\":\"%s\",\"axes\":%u,\"totalAxes\":%u,\"axisNames\":\"%s\",\"volumes\":%u,\"numTools\":%u,\"myName\":\"%.s\",\"firmwareName\":\"%.s\"",
-						move->GetGeometryString(), numVisibleAxes, gCodes->GetTotalAxes(), gCodes->GetAxisLetters(),
+						move->GetGeometryString(),
+						static_cast<unsigned int>(numVisibleAxes),
+						static_cast<unsigned int>(gCodes->GetTotalAxes()),
+						gCodes->GetAxisLetters(),
 #if HAS_MASS_STORAGE || HAS_EMBEDDED_FILES
 							MassStorage::GetNumVolumes(),
 #else
@@ -2355,7 +2358,7 @@ GCodeResult RepRap::GetFileInfoResponse(c_string _ecv_null filename, OutputBuffe
 
 	if (info.isValid)
 	{
-		response->printf("{\"err\":0,\"fileName\":\"%.s\",\"size\":%lu,", ((specificFile) ? filename : printMonitor->GetPrintingFilename()), info.fileSize);
+				response->printf("{\"err\":0,\"fileName\":\"%.s\",\"size\":%lu,", ((specificFile) ? filename : printMonitor->GetPrintingFilename()), static_cast<unsigned long>(info.fileSize));
 		tm timeInfo;
 		gmtime_r(&info.lastModifiedTime, &timeInfo);
 		if (timeInfo.tm_year > /*19*/80)
