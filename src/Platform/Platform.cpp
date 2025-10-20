@@ -40,6 +40,7 @@
 #include "Logger.h"
 #include "Tasks.h"
 #include <Cache.h>
+#include <General/RingBuffer.h>
 #include <Hardware/Spi/SharedSpiDevice.h>
 #include <Math/Isqrt.h>
 #include <Hardware/I2C.h>
@@ -808,7 +809,7 @@ void Platform::Spin() noexcept
 		return;
 	}
 
-#if SUPPORT_REMOTE_COMMANDS
+#if SUPPORT_REMOTE_COMMANDS && HAS_VOLTAGE_MONITOR
 	if (CanInterface::InExpansionMode())
 	{
 		// Update status LED
@@ -823,7 +824,7 @@ void Platform::Spin() noexcept
 	}
 #endif
 
-#if SUPPORT_CAN_EXPANSION
+#if SUPPORT_CAN_EXPANSION && HAS_VOLTAGE_MONITOR
 	// Turn off the ACT LED if it is time to do so
 	if (millis() - whenLastCanMessageProcessed > ActLedFlashTime)
 	{
@@ -3662,6 +3663,7 @@ void Platform::SetBoardType() noexcept
 					: BoardType::Duet3Mini_Ethernet;
 #elif defined(DUET3_MB6HC)
 	board = GetMB6HCBoardType();
+# if HAS_VOLTAGE_MONITOR
 	if (board >= BoardType::Duet3_6HC_v102)
 	{
 		powerMonitorVoltageRange = PowerMonitorVoltageRange_v102;
@@ -3678,6 +3680,7 @@ void Platform::SetBoardType() noexcept
 	}
 	driverPowerOnAdcReading = PowerVoltageToAdcReading(10.0);
 	driverPowerOffAdcReading = PowerVoltageToAdcReading(9.5);
+# endif
 #elif defined(DUET3_MB6XD)
 	board = GetMB6XDBoardType();
 #elif defined(FMDC_V02) || defined(FMDC_V03)
@@ -4145,7 +4148,9 @@ void Platform::HandleRemoteGpInChange(CanAddress src, uint8_t handleMajor, uint8
 void Platform::OnProcessingCanMessage() noexcept
 {
 	whenLastCanMessageProcessed = millis();
+#if HAS_VOLTAGE_MONITOR
 	digitalWrite(ActLedPin, ActOnPolarity);				// turn the ACT LED on
+#endif
 }
 
 #endif
@@ -4204,14 +4209,20 @@ uint32_t Platform::Random() noexcept
 
 void Platform::SetDiagLed(bool on) const noexcept
 {
+#if HAS_VOLTAGE_MONITOR
 	digitalWrite(DiagPin, XNor(DiagOnPolarity, on));
+#else
+	(void)on;
+#endif
 }
 
 #if SUPPORT_MULTICAST_DISCOVERY
 
 void Platform::InvertDiagLed() const noexcept
 {
+#if HAS_VOLTAGE_MONITOR
 	digitalWrite(DiagPin, !digitalRead(DiagPin));
+#endif
 }
 
 #endif

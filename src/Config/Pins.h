@@ -3,41 +3,49 @@
 
 // Load Pins_<platform>.h
 
-#if !defined(PLATFORM)
-# if defined(__SAM4E8E__)
-#  define PLATFORM DuetNG
-# elif defined(__SAME70Q20B__) || defined(__SAME70Q21B__) || defined(__SAMV71Q20B__)
-#  if defined(DUET3_MB6HC)
-#   define PLATFORM Duet3_MB6HC
-#   define DUET3		1
-#  elif defined(DUET3_MB6XD)
-#   define PLATFORM Duet3_MB6XD
-#   define DUET3		1
+#if defined(RRF_HOST_BUILD)
+
+# include "Pins_Host_MB6HC.h"
+
+#else
+
+# if !defined(PLATFORM)
+#  if defined(__SAM4E8E__)
+#   define PLATFORM DuetNG
+#  elif defined(__SAME70Q20B__) || defined(__SAME70Q21B__) || defined(__SAMV71Q20B__)
+#   if defined(DUET3_MB6HC)
+#    define PLATFORM Duet3_MB6HC
+#    define DUET3		1
+#   elif defined(DUET3_MB6XD)
+#    define PLATFORM Duet3_MB6XD
+#    define DUET3		1
+#   else
+#    error Unknown platform
+#   endif
+#  elif defined(PCCB)
+#   define PLATFORM Pccb
+#  elif defined(DUET3MINI_V04)
+#   define DUET3MINI		1
+#   define PLATFORM Duet3Mini
+#  elif defined(FMDC_V02) || defined(FMDC_V03)
+#   define DUET3MINI		1
+#   define PLATFORM FMDC
 #  else
 #   error Unknown platform
 #  endif
-# elif defined(PCCB)
-#  define PLATFORM Pccb
-# elif defined(DUET3MINI_V04)
-#  define DUET3MINI		1
-#  define PLATFORM Duet3Mini
-# elif defined(FMDC_V02) || defined(FMDC_V03)
-#  define DUET3MINI		1
-#  define PLATFORM FMDC
-# else
-#  error Unknown platform
 # endif
-#endif
 
-#if !defined(P_INCLUDE_FILE)
-# define P_EXPAND(x) x
-# define P_CONCAT(x,y) P_EXPAND(x)y
-# define P_STR(x) #x
-# define P_XSTR(x) P_STR(x)
-# define P_INCLUDE_FILE P_XSTR(P_CONCAT(Pins_,P_CONCAT(PLATFORM,.h)))
-#endif
+# if !defined(P_INCLUDE_FILE)
+#  define P_EXPAND(x) x
+#  define P_CONCAT(x,y) P_EXPAND(x)y
+#  define P_STR(x) #x
+#  define P_XSTR(x) P_STR(x)
+#  define P_INCLUDE_FILE P_XSTR(P_CONCAT(Pins_,P_CONCAT(PLATFORM,.h)))
+# endif
 
-#include P_INCLUDE_FILE
+# include P_INCLUDE_FILE
+
+#endif	// RRF_HOST_BUILD
 
 // Apply default values to anything not configured
 #ifndef SUPPORT_NONLINEAR_EXTRUSION
