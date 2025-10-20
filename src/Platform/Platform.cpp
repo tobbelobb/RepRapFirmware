@@ -2049,6 +2049,9 @@ GCodeResult Platform::DiagnosticTest(GCodeBuffer& gb, const StringRef& reply, Ou
 #endif
 
 	case (unsigned int)DiagnosticTestType::PrintObjectSizes:
+#if RRF_HOST_BUILD
+		reply.copy("Object size diagnostics unavailable in host build");
+#else
 		reply.printf(
 				"Task %u, DDA %u, DDARing %u, DM %u, MS %u, Tool %u, GCodeBuffer %u, heater %u, mbox %u"
 #if HAS_NETWORKING
@@ -2059,6 +2062,7 @@ GCodeResult Platform::DiagnosticTest(GCodeBuffer& gb, const StringRef& reply, Ou
 				, sizeof(HttpResponder), sizeof(FtpResponder), sizeof(TelnetResponder)
 #endif
 			);
+#endif
 		break;
 
 #if RRF_HOST_BUILD
