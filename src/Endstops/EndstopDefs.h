@@ -9,6 +9,7 @@
 #define SRC_ENDSTOPS_ENDSTOPDEFS_H_
 
 #include <General/NamedEnum.h>
+#include <RepRapFirmware.h>
 
 // Forward declarations
 class EndstopOrZProbe;

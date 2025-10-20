@@ -699,7 +699,7 @@ GCodeResult Move::ConfigureDriverBrakePort(GCodeBuffer& gb, const StringRef& rep
 
 	if (!seen)
 	{
-		reply.printf("Driver %u uses brake port ", driver);
+		reply.printf("Driver %zu uses brake port ", driver);
 		brakePorts[driver].AppendPinName(reply);
 # if SUPPORT_BRAKE_PWM
 		if (brakeVoltages[driver] < FullyOnBrakeVoltage)
@@ -1217,7 +1217,7 @@ void Move::ReportM569Parameters(size_t drive, const StringRef& reply) noexcept
 {
 	// Print the basic parameters common to all types of driver
 	reply.printf("Drive %u runs %s, active %s enable",
-					drive,
+					(unsigned int)drive,
 					(GetDirectionValue(drive)) ? "forwards" : "in reverse",
 					(GetEnableValue(drive) > 0) ? "high" : "low");
 #if SUPPORT_SLOW_DRIVERS

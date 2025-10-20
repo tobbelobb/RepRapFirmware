@@ -510,7 +510,7 @@ bool HeightMap::LoadFromFile(FileStore *f, const char *_ecv_array fname, const S
 					const float ff = SafeStrtof(p, &np);
 					if (np == p)
 					{
-						r.catf("number expected at line %" PRIu32 " column %d", row + 3, (p - buffer) + 1);
+						r.catf("number expected at line %" PRIu32 " column %td", row + 3, (p - buffer) + 1);
 						return true;						// failed to read a number
 					}
 #if SUPPORT_PROBE_POINTS_FILE

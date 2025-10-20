@@ -42,6 +42,11 @@
 #include <ObjectModel/Variable.h>
 #include <AsyncSerial.h>
 
+#if RRF_HOST_BUILD
+# include <HostTiming.h>
+# include <src/GCodeInjector.h>
+#endif
+
 #if HAS_SBC_INTERFACE
 # include <SBC/SbcInterface.h>
 #endif
@@ -1471,7 +1476,7 @@ void GCodes::SaveResumeInfo(bool wasPowerFailure) noexcept
 				// Select each motion system in turn and write its settings
 				for (size_t i = 0; ok && i < NumMovementSystems; ++i)
 				{
-					buf.printf("M596 P%u\n", i);
+					buf.printf("M596 P%zu\n", i);
 					ok = f->Write(buf.c_str()) && SaveMoveStateResumeInfo(moveStates[i], f, printingFilename, buf.GetRef());
 				}
 
@@ -2090,7 +2095,7 @@ bool GCodes::LoadExtrusionFromGCode(GCodeBuffer& gb, MovementState& ms) THROWS(G
 			{
 				speeds[i] = ms.raw.coords[ExtruderToLogicalDrive(i)] * ms.raw.feedRate / cookedTotalExtrusion;
 			}
-			bool reduceAcceleration;
+			bool reduceAcceleration = false;
 			platform.GetEndstops().EnableExtruderEndstops(extrudersMoving, speeds, reduceAcceleration);			// this will throw if the endstops can't be enabled
 			if (reduceAcceleration)
 			{
@@ -2455,7 +2460,7 @@ bool GCodes::DoStraightMove(GCodeBuffer& gb, bool isCoordinated) THROWS(GCodeExc
 			}
 		}
 
-		bool reduceAcceleration;
+		bool reduceAcceleration = false;
 		platform.GetEndstops().EnableAxisEndstops(axesMentioned & AxesBitmap::MakeLowestNBits(numTotalAxes), speeds, ms.raw.moveType == 1, reduceAcceleration); 	// throws if endstops can't be enabled
 		if (reduceAcceleration)
 		{
@@ -3597,7 +3602,7 @@ void GCodes::HandleM114(GCodeBuffer& gb, const StringRef& s) const noexcept
 	// Now the extruder coordinates
 	for (size_t i = 0; i < numExtruders; i++)
 	{
-		s.catf("E%u:%.1f ", i, (double)ms.LiveMachineCoordinate(ExtruderToLogicalDrive(i)));
+		s.catf("E%zu:%.1f ", i, (double)ms.LiveMachineCoordinate(ExtruderToLogicalDrive(i)));
 	}
 
 	// Print the axis stepper motor positions as Marlin does, as an aid to debugging.
@@ -3747,6 +3752,21 @@ GCodeResult GCodes::DoDwell(GCodeBuffer& gb) THROWS(GCodeException)
 		return GCodeResult::ok;
 	}
 
+#if RRF_HOST_BUILD
+	// On host we want to keep track of simulation time even when we're not running in simulation mode
+	if ( &gb != DaemonGCode()
+		&& &gb != TriggerGCode()
+		&& (gb.IsFileChannel() || !exitSimulationWhenFileComplete)
+	   )
+	{
+		const uint32_t dwellMillis = static_cast<uint32_t>(dwell);
+		const uint64_t dwellStepClocks = static_cast<uint64_t>(MillisToStepClocks(dwellMillis));
+		HostTiming::AdvanceStepClocks(dwellStepClocks);
+		HostTiming::ReportSimulationClocks(dwellStepClocks);
+		simulationTime += (float)dwell * 0.001;
+		return GCodeResult::ok;
+	}
+#else
 	if (   IsSimulating()															// if we are simulating then simulate the G4...
 		&& &gb != DaemonGCode()														// ...unless it comes from the daemon...
 		&& &gb != TriggerGCode()													// ...or a trigger...
@@ -3756,6 +3776,7 @@ GCodeResult GCodes::DoDwell(GCodeBuffer& gb) THROWS(GCodeException)
 		simulationTime += (float)dwell * 0.001;
 		return GCodeResult::ok;
 	}
+#endif
 
 	return (gb.DoDwellTime((uint32_t)dwell)) ? GCodeResult::ok : GCodeResult::notFinished;
 }
@@ -4156,6 +4177,13 @@ void GCodes::HandleReply(GCodeBuffer& gb, GCodeResult rslt, const char *_ecv_arr
 // Note that 'reply' may be empty. If it isn't, then we need to append newline when sending it.
 void GCodes::HandleReplyPreserveResult(GCodeBuffer& gb, GCodeResult rslt, const char *_ecv_array reply) noexcept
 {
+#if RRF_HOST_BUILD
+	if (gb.GetChannel() == GCodeChannel::HTTP)
+	{
+		GCodeInjector::Instance().OnResponse(reply);
+	}
+#endif
+
 #if HAS_SBC_INTERFACE
 	// Deal with replies to the SBC
 	if (gb.LatestMachineState().lastCodeFromSbc)
@@ -4680,7 +4708,8 @@ void GCodes::StopPrint(GCodeBuffer *_ecv_null gbp, StopPrintReason reason) noexc
 		}
 
 		// Pronterface expects a "Done printing" message
-		if (UsbGCode()->LatestMachineState().compatibility == Compatibility::Marlin)
+		const GCodeBuffer *_ecv_null const usbGb = UsbGCode();
+		if (usbGb != nullptr && usbGb->LatestMachineState().compatibility == Compatibility::Marlin)
 		{
 			platform.Message(UsbMessage, "Done printing file\n");
 		}
@@ -5107,7 +5136,7 @@ void GCodes::GenerateTemperatureReport(const GCodeBuffer& gb, const StringRef& r
 		}
 		else
 		{
-			reply.catf(" B%u:", hn);
+			reply.catf(" B%zu:", hn);
 		}
 		const int8_t heater = heat.GetBedHeater(hn);
 		reply.catf("%.1f /%.1f", (double)heat.GetHeaterTemperature(heater), (double)heat.GetTargetTemperature(heater));
@@ -5125,7 +5154,7 @@ void GCodes::GenerateTemperatureReport(const GCodeBuffer& gb, const StringRef& r
 		}
 		else
 		{
-			reply.catf(" C%u:", hn);
+			reply.catf(" C%zu:", hn);
 		}
 		const int8_t heater = heat.GetChamberHeater(hn);
 		reply.catf("%.1f /%.1f", (double)heat.GetHeaterTemperature(heater), (double)heat.GetTargetTemperature(heater));

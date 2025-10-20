@@ -533,7 +533,7 @@ void Tool::PrintTool(const StringRef& reply) const noexcept
 	{
 		if (fanMapping.IsBitSet(fi))
 		{
-			reply.catf("%c%u", sep, fi);
+			reply.catf("%c%zu", sep, fi);
 			sep = ',';
 		}
 	}

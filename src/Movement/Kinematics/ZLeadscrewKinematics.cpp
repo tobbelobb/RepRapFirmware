@@ -160,7 +160,7 @@ bool ZLeadscrewKinematics::DoAutoCalibration(MovementState& ms, size_t numFactor
 
 	if (numFactors != numLeadscrews)
 	{
-		reply.printf("Number of calibration factors (%u) not equal to number of leadscrews (%u)", numFactors, numLeadscrews);
+		reply.printf("Number of calibration factors (%zu) not equal to number of leadscrews (%u)", numFactors, numLeadscrews);
 		return true;
 	}
 
@@ -389,7 +389,7 @@ bool ZLeadscrewKinematics::DoAutoCalibration(MovementState& ms, size_t numFactor
 				AppendCorrections(solution, reply);
 
 				reprap.GetMove().SetLatestCalibrationDeviation(finalDeviation, numFactors);
-				reply.catf(", points used %d, (mean, deviation) before (%.3f, %.3f) after (%.3f, %.3f)",
+				reply.catf(", points used %zu, (mean, deviation) before (%.3f, %.3f) after (%.3f, %.3f)",
 							numPoints,
 							(double)initialDeviation.GetMean(), (double)initialDeviation.GetDeviationFromMean(),
 							(double)finalDeviation.GetMean(), (double)finalDeviation.GetDeviationFromMean());

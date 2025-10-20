@@ -35,6 +35,8 @@ struct ExpansionBoardData
 	volatile uint32_t whenLastStatusReportReceived;
 	UniqueId uniqueId;
 	DriverData *_ecv_array _ecv_null driverData;				// an array numDrivers long of objects, or nullptr if numDrivers is zero
+	bool driverDirectionIsForwards[MaxLinearDriversPerCanSlave] = { false };
+	bool driverDirectionKnown[MaxLinearDriversPerCanSlave] = { false };
 	uint16_t accelerometerRuns;
 	uint16_t closedLoopRuns;
 	uint16_t hasMcuTemp : 1,
@@ -61,6 +63,8 @@ public:
 	void ProcessAnnouncement(CanMessageBuffer *buf, bool isNewFormat) noexcept;
 	void ProcessBoardStatusReport(const CanMessageBuffer *buf) noexcept;
 	void ProcessDriveStatusReport(const CanMessageBuffer *buf) noexcept;
+	void SetDriverDirection(CanAddress address, uint8_t driver, bool forwards) noexcept;
+	bool TryGetDriverDirection(CanAddress address, uint8_t driver, bool& forwards) const noexcept;
 
 	// Firmware update and related functions
 	GCodeResult ResetRemote(uint32_t boardAddress, GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException);

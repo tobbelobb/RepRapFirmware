@@ -14,6 +14,12 @@
 #include "Socket.h"
 #include "GCodes/GCodes.h"
 #include "General/IP4String.h"
+#include <cstring>
+#if RRF_HOST_BUILD
+# include <HostIdle.h>
+# include <string>
+# include <src/GCodeInjector.h>
+#endif
 
 #define KO_START "rr_"
 const size_t KoFirst = 3;
@@ -38,6 +44,105 @@ const char *_ecv_array const ErrorPagePart1 =
 const char *_ecv_array const ErrorPagePart2 =
 	"</p>\n"
 	"</body>\n";
+
+#if RRF_HOST_BUILD
+static bool PathMatchesMachineEndpoint(const char *_ecv_array path,
+										  const char *_ecv_array endpoint) noexcept
+{
+	if (path == nullptr || endpoint == nullptr)
+	{
+		return false;
+	}
+
+	if (*path == '/')
+	{
+		++path;
+	}
+	if (*endpoint == '/')
+	{
+		++endpoint;
+	}
+
+	const size_t endpointLen = strlen(endpoint);
+	if (!StringStartsWith(path, endpoint))
+	{
+		return false;
+	}
+
+	const char terminator = path[endpointLen];
+	return terminator == 0 || terminator == '/' || terminator == '?';
+}
+
+template <size_t Len> void TrimTrailingNewlines(String<Len>& value) noexcept
+{
+	size_t length = value.strlen();
+	while (length != 0)
+	{
+		const char c = value[length - 1];
+		if (c == '\n' || c == '\r')
+		{
+			value.Truncate(length - 1);
+			length--;
+		}
+		else
+		{
+			break;
+		}
+	}
+}
+
+template <size_t Len> void DecodeUrlEncoded(String<Len>& value) noexcept
+{
+	auto hex = [](char c) noexcept -> int
+	{
+		if (c >= '0' && c <= '9')
+		{
+			return c - '0';
+		}
+		if (c >= 'A' && c <= 'F')
+		{
+			return 10 + (c - 'A');
+		}
+		if (c >= 'a' && c <= 'f')
+		{
+			return 10 + (c - 'a');
+		}
+		return -1;
+	};
+
+	const size_t length = value.strlen();
+	size_t readPos = 0;
+	size_t writePos = 0;
+	while (readPos < length)
+	{
+		const char c = value[readPos];
+		if (c == '+')
+		{
+			value[writePos++] = ' ';
+		}
+		else if (c == '%' && readPos + 2 < length)
+		{
+			const int hi = hex(value[readPos + 1]);
+			const int lo = hex(value[readPos + 2]);
+			if (hi >= 0 && lo >= 0)
+			{
+				value[writePos++] = (char)((hi << 4) | lo);
+				readPos += 2;
+			}
+			else
+			{
+				value[writePos++] = c;
+			}
+		}
+		else
+		{
+			value[writePos++] = c;
+		}
+		++readPos;
+	}
+	value.Truncate(writePos);
+}
+#endif
 
 HttpResponder::HttpResponder(NetworkResponder *_ecv_from _ecv_null n) noexcept : UploadingNetworkResponder(n)
 {
@@ -563,7 +668,7 @@ bool HttpResponder::GetJsonResponse(const char *_ecv_array request, OutputBuffer
 		}
 		else
 		{
-			response->printf("{\"buff\":%u}", httpInput->BufferSpaceLeft());
+			response->printf("{\"buff\":%zu}", httpInput->BufferSpaceLeft());
 		}
 	}
 #if HAS_MASS_STORAGE
@@ -757,7 +862,7 @@ bool HttpResponder::SendFileInfo(bool quitEarly) noexcept
 						"Expires: 0\r\n"
 						"Content-Type: application/json\r\n"
 					);
-		outBuf->catf("Content-Length: %u\r\n", (jsonResponse != nullptr) ? jsonResponse->Length() : 0);
+		outBuf->catf("Content-Length: %zu\r\n", (jsonResponse != nullptr) ? jsonResponse->Length() : 0);
 		AddCorsHeader();
 		outBuf->cat("Connection: close\r\n\r\n");
 		outBuf->Append(jsonResponse);
@@ -779,6 +884,12 @@ bool HttpResponder::SendFileInfo(bool quitEarly) noexcept
 // Authenticate the client and return true on success including a new session key if supported
 bool HttpResponder::Authenticate(bool withSessionKey, HttpSessionKey &sessionKey) noexcept
 {
+
+#if RRF_HOST_BUILD
+	sessionKey = NoSessionKey;
+	return true;
+
+#else
 	if (numSessions < MaxHttpSessions)
 	{
 		if (withSessionKey)
@@ -816,11 +927,16 @@ bool HttpResponder::Authenticate(bool withSessionKey, HttpSessionKey &sessionKey
 		return true;
 	}
 	return false;
+#endif
 }
 
 // Check and update the authentication
 bool HttpResponder::CheckAuthenticated() noexcept
 {
+
+#if RRF_HOST_BUILD
+	return true;
+#endif
 	const HttpSessionKey key = GetSessionKey();
 	const IPAddress remoteIP = GetRemoteIP();
 	for (size_t i = 0; i < numSessions; i++)
@@ -1051,7 +1167,7 @@ void HttpResponder::SendGCodeReply() noexcept
 
 			if (reprap.Debug(Module::Webserver))
 			{
-				GetPlatform().MessageF(UsbMessage, "Sending G-Code reply to HTTP client %d of %d (length %u)\n", clientsServed, numSessions, gcodeReply.DataLength());
+				GetPlatform().MessageF(UsbMessage, "Sending G-Code reply to HTTP client %d of %d (length %zu)\n", clientsServed, numSessions, gcodeReply.DataLength());
 			}
 		}
 
@@ -1062,7 +1178,7 @@ void HttpResponder::SendGCodeReply() noexcept
 						"Expires: 0\r\n"
 						"Content-Type: text/plain\r\n"
 					);
-		outBuf->catf("Content-Length: %u\r\n", gcodeReply.DataLength());
+		outBuf->catf("Content-Length: %zu\r\n", gcodeReply.DataLength());
 		AddCorsHeader();
 		outBuf->cat("Connection: close\r\n\r\n");
 		outStack.Append(gcodeReply);
@@ -1237,6 +1353,15 @@ void HttpResponder::ProcessRequest() noexcept
 		commandWords[1] = relativePath;
 	}
 
+#if RRF_HOST_BUILD
+	bool hostMachineCode = PathMatchesMachineEndpoint(commandWords[1], "/machine/code");
+	if (hostMachineCode || PathMatchesMachineEndpoint(commandWords[1], "/machine/model"))
+	{
+		commandWords[1] = (hostMachineCode) ? KO_START "gcode" : KO_START "model";
+		HostIdle::SetServerIdle(false);
+	}
+#endif
+
 	// Reserve an output buffer before we process the request, or we won't be able to reply
 	if (outBuf != nullptr || OutputBuffer::Allocate(outBuf))
 	{
@@ -1286,9 +1411,129 @@ void HttpResponder::ProcessRequest() noexcept
 
 		if (CheckAuthenticated() && StringEqualsIgnoreCase(commandWords[0], "POST"))
 		{
+#if RRF_HOST_BUILD
+			auto readPlainCommand = [&](String<WebMessageLength>& target) noexcept -> bool
+			{
+				size_t expected = 0;
+				const char *_ecv_array const lenHeader = GetHeaderValue("Content-Length");
+				if (lenHeader != nullptr)
+				{
+					expected = StrToU32(lenHeader);
+				}
+
+				for (;;)
+				{
+					const uint8_t *_ecv_array buffer;
+					size_t len;
+					if (!skt->ReadBuffer(buffer, len) || len == 0)
+					{
+						break;
+					}
+
+					const size_t already = target.strlen();
+					const size_t remaining = (expected > already) ? (expected - already) : 0;
+					const size_t toCopy = (expected == 0 || remaining == 0 || remaining > len)
+											 ? len
+											 : remaining;
+
+					target.catn(reinterpret_cast<const char*>(buffer), toCopy);
+					skt->Taken(toCopy);
+
+					if ((expected != 0 && target.strlen() >= expected) || toCopy < len)
+					{
+						break;
+					}
+				}
+
+				TrimTrailingNewlines(target);
+				return (expected == 0) ? !target.IsEmpty() : target.strlen() >= expected;
+			};
+
+			const bool isHttpGcode = StringEqualsIgnoreCase(commandWords[1], KO_START "gcode") ||
+								 (commandWords[1][0] == '/' && StringEqualsIgnoreCase(commandWords[1] + 1, KO_START "gcode"));
+			if (hostMachineCode || isHttpGcode)
+			{
+				String<WebMessageLength> plainCommand;
+				const char *_ecv_array command = GetKeyValue("gcode");
+				if ((command == nullptr || command[0] == 0) && numQualKeys < MaxQualKeys)
+				{
+					const char *_ecv_array const contentType = GetHeaderValue("Content-Type");
+					const bool isFormEncoded =
+						(contentType != nullptr) && StringStartsWith(contentType, "application/x-www-form-urlencoded");
+					const bool allowPlainBody =
+						(contentType == nullptr)
+						|| StringStartsWith(contentType, "text/plain")
+						|| isFormEncoded;
+
+					if (allowPlainBody && readPlainCommand(plainCommand))
+					{
+						if (isFormEncoded && StringStartsWith(plainCommand.c_str(), "gcode="))
+						{
+							plainCommand.Erase(0, 6);
+							DecodeUrlEncoded(plainCommand);
+						}
+						qualifiers[numQualKeys].key = "gcode";
+						qualifiers[numQualKeys].value = plainCommand.c_str();
+						++numQualKeys;
+					}
+				}
+
+				if (hostMachineCode)
+				{
+					auto sendError = [&](const char* message)
+					{
+						const size_t messageLen = strlen(message);
+						outBuf->copy("HTTP/1.1 400 Bad Request\r\n"
+									 "Content-Type: text/plain\r\n"
+									 "Cache-Control: no-cache, no-store, must-revalidate\r\n"
+									 "Pragma: no-cache\r\n"
+									 "Expires: 0\r\n");
+						outBuf->catf("Content-Length: %u\r\n", static_cast<unsigned int>(messageLen));
+						AddCorsHeader();
+						outBuf->cat("Connection: close\r\n\r\n");
+						outBuf->cat(message);
+						Commit();
+					};
+
+					const char *_ecv_array const gcodeValue = GetKeyValue("gcode");
+					if (gcodeValue == nullptr || gcodeValue[0] == 0)
+					{
+						sendError("Error: Empty G-code");
+						return;
+					}
+
+					std::string trimmed = gcodeValue;
+					const auto first = trimmed.find_first_not_of(" \t\r\n");
+					const auto last = trimmed.find_last_not_of(" \t\r\n");
+					if (first == std::string::npos)
+					{
+						sendError("Error: Empty G-code");
+						return;
+					}
+					trimmed = trimmed.substr(first, last - first + 1);
+
+					const std::string response = GCodeInjector::Instance().ExecuteBlocking(trimmed);
+
+					outBuf->copy("HTTP/1.1 200 OK\r\n"
+								 "Cache-Control: no-cache, no-store, must-revalidate\r\n"
+								 "Pragma: no-cache\r\n"
+								 "Expires: 0\r\n"
+								 "Content-Type: text/plain\r\n");
+					outBuf->catf("Content-Length: %u\r\n", static_cast<unsigned int>(response.size()));
+					AddCorsHeader();
+					outBuf->cat("Connection: close\r\n\r\n");
+					outBuf->cat(response.c_str());
+					Commit();
+					return;
+				}
+
+				SendJsonResponse("gcode");
+				return;
+			}
+#endif
 #if HAS_MASS_STORAGE
 			const bool isUploadRequest = (StringEqualsIgnoreCase(commandWords[1], KO_START "upload"))
-									  || (commandWords[1][0] == '/' && StringEqualsIgnoreCase(commandWords[1] + 1, KO_START "upload"));
+									   || (commandWords[1][0] == '/' && StringEqualsIgnoreCase(commandWords[1] + 1, KO_START "upload"));
 			if (isUploadRequest)
 			{
 				const char *_ecv_array _ecv_null const filename = GetKeyValue("name");
@@ -1346,7 +1591,7 @@ void HttpResponder::ProcessRequest() noexcept
 
 					if (reprap.Debug(Module::Webserver))
 					{
-						GetPlatform().MessageF(UsbMessage, "Start uploading file %s length %lu\n", filename, postFileLength);
+						GetPlatform().MessageF(UsbMessage, "Start uploading file %s length %u\n", filename, postFileLength);
 					}
 					uploadedBytes = 0;
 
@@ -1650,7 +1895,7 @@ void HttpResponder::Diagnostics(const StringRef& reply) const noexcept
 
 /*static*/ void HttpResponder::CommonDiagnostics(const StringRef& reply) noexcept
 {
-	reply.lcatf("HTTP sessions: %u of %u", numSessions, MaxHttpSessions);
+	reply.lcatf("HTTP sessions: %u of %lu", numSessions, MaxHttpSessions);
 }
 
 void HttpResponder::AddCorsHeader() noexcept

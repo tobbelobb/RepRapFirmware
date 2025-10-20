@@ -158,7 +158,7 @@ void ObjectTracker::ListObjects(OutputBuffer *buf) noexcept
 		for (size_t i = 0; i < min<unsigned int>(numObjects, MaxTrackedObjects); ++i)
 		{
 			const ObjectDirectoryEntry& obj = objectDirectory[i];
-			buf->lcatf("%2u%s: X %d to %dmm, Y %d to %dmm, %s",
+			buf->lcatf("%2zu%s: X %d to %dmm, Y %d to %dmm, %s",
 						i,
 						(objectsCancelled.IsBitSet(i) ? " (cancelled)" : ""),
 						(int)obj.x[0], (int)obj.x[1],
@@ -167,7 +167,7 @@ void ObjectTracker::ListObjects(OutputBuffer *buf) noexcept
 		}
 		if (numObjects > MaxTrackedObjects)
 		{
-			buf->lcatf("%u more objects", numObjects - MaxTrackedObjects);
+			buf->lcatf("%zu more objects", numObjects - MaxTrackedObjects);
 		}
 	}
 }
@@ -183,7 +183,7 @@ bool ObjectTracker::WriteObjectDirectory(FileStore *f) const noexcept
 	for (size_t i = 0; ok && i < min<unsigned int>(numObjects, MaxTrackedObjects); ++i)
 	{
 		String<StringLength100> buf;
-		buf.printf("M486 S%u", i);
+		buf.printf("M486 S%zu", i);
 		if (!objectDirectory[i].name.IsNull())
 		{
 			buf.catf(" A\"%s\"", objectDirectory[i].name.Get().Ptr());

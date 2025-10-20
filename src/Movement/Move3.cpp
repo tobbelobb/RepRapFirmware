@@ -332,7 +332,7 @@ GCodeResult Move::FinishedBedProbing(MovementState& ms, int sParam, const String
 	}
 	else if (numPoints < (size_t)sParam)
 	{
-		reply.printf("Bed calibration : %d factor calibration requested but only %d points provided\n", sParam, numPoints);
+		reply.printf("Bed calibration : %d factor calibration requested but only %zu points provided\n", sParam, numPoints);
 		ret = GCodeResult::error;
 	}
 	else

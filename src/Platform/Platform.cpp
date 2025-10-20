@@ -41,6 +41,7 @@
 #include "Tasks.h"
 #include <Cache.h>
 #include <SPI/SharedSpiDevice.h>
+#include <General/RingBuffer.h>
 #include <Math/Isqrt.h>
 #include <Hardware/I2C.h>
 #include <Hardware/NonVolatileMemory.h>
@@ -2031,6 +2032,9 @@ GCodeResult Platform::DiagnosticTest(GCodeBuffer& gb, const StringRef& reply, Ou
 #endif
 
 	case (unsigned int)DiagnosticTestType::PrintObjectSizes:
+#if RRF_HOST_BUILD
+		reply.copy("Object size diagnostics unavailable in host build");
+#else
 		reply.printf(
 				"Task %u, DDA %u, DDARing %u, DM %u, MS %u, Tool %u, GCodeBuffer %u, heater %u, mbox %u"
 #if HAS_NETWORKING
@@ -2041,8 +2045,14 @@ GCodeResult Platform::DiagnosticTest(GCodeBuffer& gb, const StringRef& reply, Ou
 				, sizeof(HttpResponder), sizeof(FtpResponder), sizeof(TelnetResponder)
 #endif
 			);
+#endif
 		break;
 
+#if RRF_HOST_BUILD
+	case (unsigned int)DiagnosticTestType::PrintObjectAddresses:
+		MessageF(MessageType::GenericMessage, "Object address diagnostics unavailable in host build\n");
+		break;
+#else
 	case (unsigned int)DiagnosticTestType::PrintObjectAddresses:
 		MessageF(MessageType::GenericMessage,
 					"Platform %08" PRIx32 "-%08" PRIx32
@@ -2091,6 +2101,7 @@ GCodeResult Platform::DiagnosticTest(GCodeBuffer& gb, const StringRef& reply, Ou
 #endif
 				);
 		break;
+#endif
 
 	case (unsigned int)DiagnosticTestType::TimeCRC32:
 		{
@@ -2112,7 +2123,7 @@ GCodeResult Platform::DiagnosticTest(GCodeBuffer& gb, const StringRef& reply, Ou
 			now1 &= 0x00FFFFFF;
 			now2 &= 0x00FFFFFF;
 			uint32_t tim1 = ((now1 > now2) ? now1 : now1 + (SysTick->LOAD & 0x00FFFFFF) + 1) - now2;
-			reply.printf("CRC of %u bytes took %.2fus", length, (double)((1'000'000.0f * (float)tim1)/(float)SystemCoreClock));
+			reply.printf("CRC of %zu bytes took %.2fus", length, (double)((1'000'000.0f * (float)tim1)/(float)SystemCoreClock));
 		}
 		break;
 
@@ -2358,7 +2369,7 @@ GCodeResult Platform::HandleM575(GCodeBuffer& gb, const StringRef& reply) THROWS
 		const AuxMode mode = GetChannelMode(chan);
 		if (mode == AuxMode::disabled)
 		{
-			reply.printf("Channel %u is disabled", chan);
+			reply.printf("Channel %zu is disabled", chan);
 		}
 		else
 		{
@@ -2372,7 +2383,7 @@ GCodeResult Platform::HandleM575(GCodeBuffer& gb, const StringRef& reply) THROWS
 #if NUM_ASYNC_CHANNELS != 0
 			if (chan >= FirstAuxChannel)
 			{
-				reply.printf("Channel %u (Aux %u): baud rate %" PRIu32 ", %s mode, ", chan, chan - FirstAuxChannel, GetBaudRate(chan), modeString);
+				reply.printf("Channel %zu (Aux %zu): baud rate %" PRIu32 ", %s mode, ", chan, chan - FirstAuxChannel, GetBaudRate(chan), modeString);
 				if (mode == AuxMode::device)
 				{
 # if SUPPORT_MODBUS_RTU
