@@ -9,6 +9,7 @@
 #define SRC_OBJECTMODEL_OBJECTMODEL_H_
 
 #include <RepRapFirmware.h>
+#include <cstdint>
 #include <GCodes/GCodeException.h>
 #include <Platform/StringHandle.h>
 #include <Platform/ArrayHandle.h>
@@ -63,7 +64,7 @@ struct ExpressionValue final
 		ArrayHandle ahVal;
 		const IoPort *iopVal;
 		const UniqueId *uniqueIdVal;
-		uint32_t whole;								// a member we can use to copy the whole thing safely, at least as big as all the others. Assumes all other members are trivially copyable.
+		std::uintptr_t whole;								// a member we can use to copy the whole thing safely, at least as big as all the others. Assumes all other members are trivially copyable.
 	};
 
 	static_assert(sizeof(whole) >= sizeof(shVal));

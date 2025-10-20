@@ -64,6 +64,17 @@ constexpr uint8_t HangprinterKinematics::objectModelTableDescriptor[] = { 1, 2 }
 
 DEFINE_GET_OBJECT_MODEL_TABLE_WITH_PARENT(HangprinterKinematics, RoundBedKinematics)
 
+Kinematics::KinematicsTypeDescriptor HangprinterKinematics::hangprinterKinematicsDescriptor(HangprinterKinematics::Create);
+
+/*static*/ Kinematics *_ecv_from _ecv_null HangprinterKinematics::Create(const char *_ecv_array _ecv_null name, int legacyNumber) noexcept
+{
+	if (MatchesLegacyType(name, legacyNumber, KinematicsType::hangprinter))
+	{
+		return new HangprinterKinematics();
+	}
+	return nullptr;
+}
+
 // Constructor
 HangprinterKinematics::HangprinterKinematics() noexcept
 	: RoundBedKinematics(KinematicsType::hangprinter, SegmentationType(true, true, true))
@@ -344,26 +355,26 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 MovementError HangprinterKinematics::CartesianToMotorSteps(const float machinePos[], const float stepsPerMm[],
 													size_t numVisibleAxes, size_t numTotalAxes, int32_t motorPos[], bool isCoordinated) const noexcept
 {
-	float distances[numAnchors];
+	float distances[HANGPRINTER_MAX_ANCHORS];
 	for (size_t i = 0; i < numAnchors; ++i) {
 		distances[i] = hyp3(machinePos, anchors[i]);
 	}
 
-	float springKs[numAnchors];
+	float springKs[HANGPRINTER_MAX_ANCHORS];
 	for (size_t i = 0; i < numAnchors; ++i) {
 		springKs[i] = SpringK(distances[i] * mechanicalAdvantage[i] + guyWireLengths[i]);
 	}
 
-	float F[numAnchors] = { 0.0F }; // desired force in each direction
+	float F[HANGPRINTER_MAX_ANCHORS] = { 0.0F }; // desired force in each direction
 	StaticForces(machinePos, F);
 
-	float relaxedSpringLengths[numAnchors];
+	float relaxedSpringLengths[HANGPRINTER_MAX_ANCHORS];
 	for (size_t i{0}; i < numAnchors; ++i) {
 		relaxedSpringLengths[i] = distances[i] - F[i] / (springKs[i] * mechanicalAdvantage[i]);
 		// The second term there is the mover's movement in mm due to flex
 	}
 
-	float linePos[numAnchors];
+	float linePos[HANGPRINTER_MAX_ANCHORS];
 	for (size_t i = 0; i < numAnchors; ++i) {
 		linePos[i] = relaxedSpringLengths[i] - relaxedSpringLengthsOrigin[i];
 	}
@@ -605,7 +616,7 @@ bool HangprinterKinematics::WriteCalibrationParameters(FileStore *f) const noexc
 	ok = f->Write(scratchString.c_str());
 	if (!ok) return false;
 
-	scratchString.printf("N%d", numAnchors);
+	scratchString.printf("N%ld", numAnchors);
 	for (size_t i = 0; i < numAnchors; ++i)
 	{
 		scratchString.catf("%c%.3f:%.3f:%.3f ", ANCHOR_CHARS[i], (double)anchors[i][X_AXIS], (double)anchors[i][Y_AXIS], (double)anchors[i][Z_AXIS]);

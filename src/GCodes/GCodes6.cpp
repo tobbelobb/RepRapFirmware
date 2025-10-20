@@ -693,7 +693,7 @@ GCodeResult GCodes::StraightProbe(GCodeBuffer& gb, const StringRef& reply) THROW
 	// Check if this probe exists to not run into a nullptr dereference later
 	if (platform.GetEndstops().GetZProbe(probeToUse).IsNull())
 	{
-		reply.catf("Invalid probe number: %d", probeToUse);
+		reply.catf("Invalid probe number: %zu", probeToUse);
 		return GCodeResult::error;
 	}
 	straightProbeSettings.SetZProbeToUse(probeToUse);
@@ -789,7 +789,7 @@ GCodeResult GCodes::ProbeTool(GCodeBuffer& gb, const StringRef& reply) THROWS(GC
 // Return true if successful, else SetError has been called to save the error message
 bool GCodes::SetupM585ProbingMove(GCodeBuffer& gb) noexcept
 {
-	bool reduceAcceleration;
+	bool reduceAcceleration = false;
 	if (m585Settings.useProbe)
 	{
 		const auto zp = platform.GetZProbeOrDefault(currentZProbeNumber);

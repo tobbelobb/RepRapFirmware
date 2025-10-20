@@ -211,6 +211,9 @@ public:
 	float GetSegmentsPerSecond() const noexcept pre(GetSegmentationType().useSegmentation) { return segmentsPerSecond; }
 	float GetMinSegmentLength() const noexcept pre(GetSegmentationType().useSegmentation) { return minSegmentLength; }
 	float GetReciprocalMinSegmentLength() const noexcept pre(GetSegmentationType().useSegmentation) { return reciprocalMinSegmentLength; }
+#ifdef RRF_HOST_BUILD
+	void ConfigureSegmentationParameters(float segmentsPerSecond, float minSegmentLength) noexcept;
+#endif
 
 	LogicalDrivesBitmap GetAllDrivesUsed(AxesBitmap axesAndExtruders) const noexcept;
 

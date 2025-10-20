@@ -19,7 +19,11 @@
 #include "Kinematics/Kinematics.h"
 #include "MoveSegment.h"
 #include "DriveMovement.h"
-#include "StepTimer.h"
+#if RRF_HOST_BUILD
+# include <Movement/StepTimer.h>
+#else
+# include "StepTimer.h"
+#endif
 #include <GCodes/RestorePoint.h>
 #include <Math/Deviation.h>
 #include <Hardware/IoPorts.h>
@@ -45,7 +49,13 @@ constexpr bool DirectionBackwards = !DirectionForwards;
 // A DDA represents a move in the queue.
 // Each DDA needs one DM per drive that it moves, but only when it has been prepared and frozen
 
-#if SAME70
+#if RRF_HOST_BUILD
+
+constexpr unsigned int InitialDdaRingLength = 600;
+constexpr unsigned int AuxDdaRingLength = 50;
+const unsigned int InitialNumDms = (InitialDdaRingLength/2 * 4) + AuxDdaRingLength;
+
+#elif SAME70
 
 constexpr unsigned int InitialDdaRingLength = 60;
 constexpr unsigned int AuxDdaRingLength = 5;
@@ -354,6 +364,7 @@ public:
 
 	// Functions called by DDA::Prepare to generate segments for executing DDAs
 	void AddLinearSegments(size_t logicalDrive, uint32_t startTime, const PrepParams& params, motioncalc_t steps, MovementFlags moveFlags) noexcept;
+	void FreeOldSegments(const uint32_t now) noexcept;														// Free segments that have finished executing (simulation only)
 
 	bool AreDrivesStopped(LogicalDrivesBitmap drives) const noexcept;						// return true if none of the drives passed has any movement pending
 
@@ -364,6 +375,9 @@ public:
 	bool SetKinematics(const char *_ecv_array _ecv_null name, int legacyType) noexcept;		// Set kinematics, return true if successful
 	MovementError CartesianToMotorSteps(const float machinePos[MaxAxes], int32_t motorPos[MaxAxes], bool isCoordinated) const noexcept;
 																							// Convert Cartesian coordinates to motor coordinates, return true if successful
+#ifdef RRF_HOST_BUILD
+	void ConfigureSegmentation(float segmentsPerSecond, float minSegmentLength) noexcept;
+#endif
 	void MotorStepsToCartesian(const int32_t motorPos[], size_t numVisibleAxes, size_t numTotalAxes, float machinePos[]) const noexcept;
 																							// Convert motor coordinates to machine coordinates
 	const char *_ecv_array GetGeometryString() const noexcept { return kinematics->GetName(); }

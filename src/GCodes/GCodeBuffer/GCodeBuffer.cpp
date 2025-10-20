@@ -20,6 +20,9 @@
 #include <Platform/RepRap.h>
 #include <Platform/Platform.h>
 #include <Movement/StepTimer.h>
+#if RRF_HOST_BUILD
+# include <HostTiming.h>
+#endif
 
 // Macros to reduce the amount of explicit conditional compilation in this file
 #if HAS_SBC_INTERFACE
@@ -169,6 +172,12 @@ void GCodeBuffer::StartTimer() noexcept
 // Delay executing this GCodeBuffer for the specified time. Return true when the timer has expired.
 bool GCodeBuffer::DoDwellTime(uint32_t dwellMillis) noexcept
 {
+#if RRF_HOST_BUILD
+	HostTiming::DelayMilliseconds(dwellMillis);
+	timerRunning = false;
+	return true;
+#endif
+
 	const uint32_t now = millis();
 
 	// Are we already in the dwell?

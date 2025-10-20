@@ -235,7 +235,8 @@ void GCodeQueue::Diagnostics(const StringRef& reply) noexcept
 			if (!reprap.UsingSbcInterface())
 #endif
 			{
-				reply.lcatf("Code queue has '%.*s' for move %" PRIu32, item->dataLength, item->data, item->executeAtMove);
+				const int prec = static_cast<int>(std::min<size_t>(item->dataLength, INT_MAX));
+				reply.lcatf("Code queue has '%.*s' for move %" PRIu32, prec, item->data, item->executeAtMove);
 			}
 		} while ((item = item->Next()) != nullptr);
 	}

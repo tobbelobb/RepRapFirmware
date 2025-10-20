@@ -41,6 +41,10 @@
 #include <Endstops/ZProbe.h>
 #include <ObjectModel/Variable.h>
 
+#if RRF_HOST_BUILD
+# include <HostTiming.h>
+#endif
+
 #if HAS_SBC_INTERFACE
 # include <SBC/SbcInterface.h>
 #endif
@@ -853,6 +857,32 @@ void GCodes::EndSimulation(GCodeBuffer *null gb) noexcept
 	axesVirtuallyHomed = axesHomed;
 	reprap.MoveUpdated();
 }
+
+#if RRF_HOST_BUILD
+void GCodes::HostForceSimulationMode(SimulationMode newMode) noexcept
+{
+	if (simulationMode == newMode)
+	{
+		return;
+	}
+
+	if (newMode == SimulationMode::off)
+	{
+		simulationMode = SimulationMode::off;
+		simulationTime = 0.0f;
+		reprap.GetMove().Simulate(SimulationMode::off);
+		return;
+	}
+
+	simulationMode = newMode;
+	simulationTime = 0.0f;
+	exitSimulationWhenFileComplete = false;
+	updateFileWhenSimulationComplete = false;
+	axesVirtuallyHomed = AxesBitmap::MakeLowestNBits(numVisibleAxes);
+	MovementState::SaveEndpointsBeforeSimulating();
+	reprap.GetMove().Simulate(newMode);
+}
+#endif
 
 // Check for and execute triggers
 void GCodes::CheckTriggers() noexcept
@@ -2051,7 +2081,7 @@ bool GCodes::LoadExtrusionFromGCode(GCodeBuffer& gb, MovementState& ms, bool axe
 			{
 				speeds[i] = ms.coords[ExtruderToLogicalDrive(i)] * ms.feedRate / cookedTotalExtrusion;
 			}
-			bool reduceAcceleration;
+			bool reduceAcceleration = false;
 			platform.GetEndstops().EnableExtruderEndstops(extrudersMoving, speeds, reduceAcceleration);			// this will throw if the endstops can't be enabled
 			if (reduceAcceleration)
 			{
@@ -2403,7 +2433,7 @@ bool GCodes::DoStraightMove(GCodeBuffer& gb, bool isCoordinated) THROWS(GCodeExc
 			}
 		}
 
-		bool reduceAcceleration;
+		bool reduceAcceleration = false;
 		platform.GetEndstops().EnableAxisEndstops(axesMentioned & AxesBitmap::MakeLowestNBits(numTotalAxes), speeds, ms.moveType == 1, reduceAcceleration); 	// throws if endstops can't be enabled
 		if (reduceAcceleration)
 		{
@@ -3529,7 +3559,7 @@ void GCodes::HandleM114(GCodeBuffer& gb, const StringRef& s) const noexcept
 	// Now the extruder coordinates
 	for (size_t i = 0; i < numExtruders; i++)
 	{
-		s.catf("E%u:%.1f ", i, (double)ms.LiveMachineCoordinate(ExtruderToLogicalDrive(i)));
+		s.catf("E%zu:%.1f ", i, (double)ms.LiveMachineCoordinate(ExtruderToLogicalDrive(i)));
 	}
 
 	// Print the axis stepper motor positions as Marlin does, as an aid to debugging.
@@ -3679,6 +3709,24 @@ GCodeResult GCodes::DoDwell(GCodeBuffer& gb) THROWS(GCodeException)
 		return GCodeResult::ok;
 	}
 
+#if RRF_HOST_BUILD
+	const uint32_t dwellMillis = static_cast<uint32_t>(dwell);
+	const uint64_t dwellStepClocks = static_cast<uint64_t>(MillisToStepClocks(dwellMillis));
+#endif
+
+	#if RRF_HOST_BUILD
+	// On host we want to keep track of simulation time even when we're not running in simulation mode
+	if (  !IsSimulating()
+		&& &gb != DaemonGCode()
+		&& &gb != TriggerGCode()
+		&& (gb.IsFileChannel() || !exitSimulationWhenFileComplete)
+	   )
+	{
+		simulationTime += (float)dwell * 0.001;
+		HostTiming::AdvanceStepClocks(dwellStepClocks);
+    HostTiming::ReportSimulationClocks(dwellStepClocks);
+	}
+	#endif
 	if (   IsSimulating()															// if we are simulating then simulate the G4...
 		&& &gb != DaemonGCode()														// ...unless it comes from the daemon...
 		&& &gb != TriggerGCode()													// ...or a trigger...
@@ -3686,6 +3734,10 @@ GCodeResult GCodes::DoDwell(GCodeBuffer& gb) THROWS(GCodeException)
 	   )
 	{
 		simulationTime += (float)dwell * 0.001;
+#if RRF_HOST_BUILD
+		HostTiming::AdvanceStepClocks(dwellStepClocks);
+    HostTiming::ReportSimulationClocks(dwellStepClocks);
+#endif
 		return GCodeResult::ok;
 	}
 
@@ -4612,7 +4664,8 @@ void GCodes::StopPrint(GCodeBuffer *_ecv_null gbp, StopPrintReason reason) noexc
 		}
 
 		// Pronterface expects a "Done printing" message
-		if (UsbGCode()->LatestMachineState().compatibility == Compatibility::Marlin)
+		const GCodeBuffer *_ecv_null const usbGb = UsbGCode();
+		if (usbGb != nullptr && usbGb->LatestMachineState().compatibility == Compatibility::Marlin)
 		{
 			platform.Message(UsbMessage, "Done printing file\n");
 		}
@@ -5039,7 +5092,7 @@ void GCodes::GenerateTemperatureReport(const GCodeBuffer& gb, const StringRef& r
 		}
 		else
 		{
-			reply.catf(" B%u:", hn);
+			reply.catf(" B%zu:", hn);
 		}
 		const int8_t heater = heat.GetBedHeater(hn);
 		reply.catf("%.1f /%.1f", (double)heat.GetHeaterTemperature(heater), (double)heat.GetTargetTemperature(heater));
@@ -5057,7 +5110,7 @@ void GCodes::GenerateTemperatureReport(const GCodeBuffer& gb, const StringRef& r
 		}
 		else
 		{
-			reply.catf(" C%u:", hn);
+			reply.catf(" C%zu:", hn);
 		}
 		const int8_t heater = heat.GetChamberHeater(hn);
 		reply.catf("%.1f /%.1f", (double)heat.GetHeaterTemperature(heater), (double)heat.GetTargetTemperature(heater));

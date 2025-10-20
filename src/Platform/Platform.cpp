@@ -24,8 +24,8 @@
 #include <Devices.h>
 #include <Heating/Heat.h>
 #include <Movement/DDA.h>
-#include <Movement/Move.h>
 #include <Movement/StepTimer.h>
+#include <Movement/Move.h>
 #include <Tools/Tool.h>
 #include <Endstops/ZProbe.h>
 #include <Networking/Network.h>
@@ -40,6 +40,7 @@
 #include "Logger.h"
 #include "Tasks.h"
 #include <Cache.h>
+#include <General/RingBuffer.h>
 #include <Hardware/Spi/SharedSpiDevice.h>
 #include <Math/Isqrt.h>
 #include <Hardware/I2C.h>
@@ -808,7 +809,7 @@ void Platform::Spin() noexcept
 		return;
 	}
 
-#if SUPPORT_REMOTE_COMMANDS
+#if SUPPORT_REMOTE_COMMANDS && HAS_VOLTAGE_MONITOR
 	if (CanInterface::InExpansionMode())
 	{
 		// Update status LED
@@ -823,7 +824,7 @@ void Platform::Spin() noexcept
 	}
 #endif
 
-#if SUPPORT_CAN_EXPANSION
+#if SUPPORT_CAN_EXPANSION && HAS_VOLTAGE_MONITOR
 	// Turn off the ACT LED if it is time to do so
 	if (millis() - whenLastCanMessageProcessed > ActLedFlashTime)
 	{
@@ -2048,6 +2049,9 @@ GCodeResult Platform::DiagnosticTest(GCodeBuffer& gb, const StringRef& reply, Ou
 #endif
 
 	case (unsigned int)DiagnosticTestType::PrintObjectSizes:
+#if RRF_HOST_BUILD
+		reply.copy("Object size diagnostics unavailable in host build");
+#else
 		reply.printf(
 				"Task %u, DDA %u, DDARing %u, DM %u, MS %u, Tool %u, GCodeBuffer %u, heater %u, mbox %u"
 #if HAS_NETWORKING
@@ -2058,8 +2062,14 @@ GCodeResult Platform::DiagnosticTest(GCodeBuffer& gb, const StringRef& reply, Ou
 				, sizeof(HttpResponder), sizeof(FtpResponder), sizeof(TelnetResponder)
 #endif
 			);
+#endif
 		break;
 
+#if RRF_HOST_BUILD
+	case (unsigned int)DiagnosticTestType::PrintObjectAddresses:
+		MessageF(MessageType::GenericMessage, "Object address diagnostics unavailable in host build\n");
+		break;
+#else
 	case (unsigned int)DiagnosticTestType::PrintObjectAddresses:
 		MessageF(MessageType::GenericMessage,
 					"Platform %08" PRIx32 "-%08" PRIx32
@@ -2108,6 +2118,7 @@ GCodeResult Platform::DiagnosticTest(GCodeBuffer& gb, const StringRef& reply, Ou
 #endif
 				);
 		break;
+#endif
 
 	case (unsigned int)DiagnosticTestType::TimeCRC32:
 		{
@@ -2129,7 +2140,7 @@ GCodeResult Platform::DiagnosticTest(GCodeBuffer& gb, const StringRef& reply, Ou
 			now1 &= 0x00FFFFFF;
 			now2 &= 0x00FFFFFF;
 			uint32_t tim1 = ((now1 > now2) ? now1 : now1 + (SysTick->LOAD & 0x00FFFFFF) + 1) - now2;
-			reply.printf("CRC of %u bytes took %.2fus", length, (double)((1'000'000.0f * (float)tim1)/(float)SystemCoreClock));
+			reply.printf("CRC of %lu bytes took %.2fus", static_cast<unsigned long>(length), (double)((1'000'000.0f * (float)tim1)/(float)SystemCoreClock));
 		}
 		break;
 
@@ -2388,7 +2399,7 @@ GCodeResult Platform::HandleM575(GCodeBuffer& gb, const StringRef& reply) THROWS
 		const AuxMode mode = GetChannelMode(chan);
 		if (mode == AuxMode::disabled)
 		{
-			reply.printf("Channel %u is disabled", chan);
+			reply.printf("Channel %u is disabled", static_cast<unsigned int>(chan));
 		}
 		else
 		{
@@ -2402,7 +2413,12 @@ GCodeResult Platform::HandleM575(GCodeBuffer& gb, const StringRef& reply) THROWS
 #if HAS_AUX_DEVICES
 			if (chan != 0)
 			{
-				reply.printf("Channel %u (Aux %u): baud rate %" PRIu32 ", %s mode, ", chan, chan - 1, GetBaudRate(chan), modeString);
+				reply.printf(
+					"Channel %u (Aux %u): baud rate %" PRIu32 ", %s mode, ",
+					static_cast<unsigned int>(chan),
+					static_cast<unsigned int>(chan - 1),
+					GetBaudRate(chan),
+					modeString);
 				if (mode == AuxMode::device)
 				{
 # if SUPPORT_MODBUS_RTU
@@ -3662,6 +3678,7 @@ void Platform::SetBoardType() noexcept
 					: BoardType::Duet3Mini_Ethernet;
 #elif defined(DUET3_MB6HC)
 	board = GetMB6HCBoardType();
+# if HAS_VOLTAGE_MONITOR
 	if (board >= BoardType::Duet3_6HC_v102)
 	{
 		powerMonitorVoltageRange = PowerMonitorVoltageRange_v102;
@@ -3678,6 +3695,7 @@ void Platform::SetBoardType() noexcept
 	}
 	driverPowerOnAdcReading = PowerVoltageToAdcReading(10.0);
 	driverPowerOffAdcReading = PowerVoltageToAdcReading(9.5);
+# endif
 #elif defined(DUET3_MB6XD)
 	board = GetMB6XDBoardType();
 #elif defined(FMDC_V02) || defined(FMDC_V03)
@@ -4145,7 +4163,9 @@ void Platform::HandleRemoteGpInChange(CanAddress src, uint8_t handleMajor, uint8
 void Platform::OnProcessingCanMessage() noexcept
 {
 	whenLastCanMessageProcessed = millis();
+#if HAS_VOLTAGE_MONITOR
 	digitalWrite(ActLedPin, ActOnPolarity);				// turn the ACT LED on
+#endif
 }
 
 #endif
@@ -4204,14 +4224,20 @@ uint32_t Platform::Random() noexcept
 
 void Platform::SetDiagLed(bool on) const noexcept
 {
+#if HAS_VOLTAGE_MONITOR
 	digitalWrite(DiagPin, XNor(DiagOnPolarity, on));
+#else
+	(void)on;
+#endif
 }
 
 #if SUPPORT_MULTICAST_DISCOVERY
 
 void Platform::InvertDiagLed() const noexcept
 {
+#if HAS_VOLTAGE_MONITOR
 	digitalWrite(DiagPin, !digitalRead(DiagPin));
+#endif
 }
 
 #endif

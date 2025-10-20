@@ -71,6 +71,10 @@ static_assert(CONF_HSMCI_XDMAC_CHANNEL == DmacChanHsmci, "mismatched DMA channel
 # include <CAN/ExpansionManager.h>
 #endif
 
+#if RRF_HOST_BUILD
+# include <cstdlib>
+#endif
+
 #include "FreeRTOS.h"
 #include "task.h"
 
@@ -519,34 +523,36 @@ void RepRap::Init() noexcept
 	NVIC_EnableIRQ(WDT_IRQn);														// enable the watchdog early warning interrupt
 #else
 	{
+# if !RRF_HOST_BUILD
 		// The clock frequency for both watchdogs is about 32768/128 = 256Hz
 		// The watchdogs on the SAM4E seem to be very timing-sensitive. On the Duet WiFi/Ethernet they were going off spuriously depending on how long the DueX initialisation took.
 		// The documentation says you mustn't write to the mode register within 3 slow clocks after kicking the watchdog.
 		// I have a theory that the converse is also true, i.e. after enabling the watchdog you mustn't kick it within 3 slow clocks
 		// So I've added a delay call before we set 'active' true (which enables kicking the watchdog), and that seems to fix the problem.
-# if SAM4E || SAME70
+#  if SAM4E || SAME70
 		const uint16_t mainTimeout = 49152/128;										// set main (back stop) watchdog timeout to 1.5s second (max allowed value is 4095 = 16 seconds)
 		WDT->WDT_MR = WDT_MR_WDRSTEN | WDT_MR_WDDBGHLT | WDT_MR_WDV(mainTimeout) | WDT_MR_WDD(mainTimeout);	// reset the processor on a watchdog fault, stop it when debugging
 
 		// The RSWDT must be initialised *after* the main WDT
 		const uint16_t rsTimeout = 32768/128;										// set secondary watchdog timeout to 1 second (max allowed value is 4095 = 16 seconds)
-#  if SAME70
+#   if SAME70
 		RSWDT->RSWDT_MR = RSWDT_MR_WDFIEN | RSWDT_MR_WDDBGHLT | RSWDT_MR_WDV(rsTimeout) | RSWDT_MR_ALLONES_Msk;		// generate an interrupt on a watchdog fault
 		NVIC_SetPriority(RSWDT_IRQn, NvicPriorityWatchdog);							// set priority for watchdog interrupts
 		NVIC_ClearPendingIRQ(RSWDT_IRQn);
 		NVIC_EnableIRQ(RSWDT_IRQn);													// enable the watchdog interrupt
-#  else
+#   else
 		RSWDT->RSWDT_MR = RSWDT_MR_WDFIEN | RSWDT_MR_WDDBGHLT | RSWDT_MR_WDV(rsTimeout) | RSWDT_MR_WDD(rsTimeout);	// generate an interrupt on a watchdog fault
 		NVIC_SetPriority(WDT_IRQn, NvicPriorityWatchdog);							// set priority for watchdog interrupts
 		NVIC_ClearPendingIRQ(WDT_IRQn);
 		NVIC_EnableIRQ(WDT_IRQn);													// enable the watchdog interrupt
-#  endif
-# else
+#   endif
+#  else
 		// We don't have a RSWDT so set the main watchdog timeout to 1 second
 		const uint16_t timeout = 32768/128;											// set watchdog timeout to 1 second (max allowed value is 4095 = 16 seconds)
 		wdt_init(WDT, WDT_MR_WDRSTEN | WDT_MR_WDDBGHLT, timeout, timeout);			// reset the processor on a watchdog fault, stop it when debugging
-# endif
+#  endif
 		delayMicroseconds(200);														// 200us is about 6 slow clocks
+# endif
 	}
 #endif
 
@@ -1154,7 +1160,7 @@ void RepRap::ReportDebugSettings(const StringRef& reply) noexcept
 	{
 		if (debugMaps[i].IsNonEmpty())
 		{
-			reply.catf(" %s(%u - %#" PRIx16 ")", Module(i).ToString(), i, debugMaps[i].GetRaw());
+			reply.catf(" %s(%u - %#" PRIx16 ")", Module(i).ToString(), static_cast<unsigned int>(i), debugMaps[i].GetRaw());
 		}
 	}
 
@@ -1163,7 +1169,7 @@ void RepRap::ReportDebugSettings(const StringRef& reply) noexcept
 	{
 		if (debugMaps[i].IsEmpty())
 		{
-			reply.catf(" %s(%u)", Module(i).ToString(), i);
+			reply.catf(" %s(%u)", Module(i).ToString(), static_cast<unsigned int>(i));
 		}
 	}
 }
@@ -1265,11 +1271,14 @@ void RepRap::Tick() noexcept
 #ifdef __ECV__
 					// eCv doesn't understand the gcc "register const... asm" line
 					const uint32_t *_ecv_array stackPtr = _ecv_undefined(const uint32_t *_ecv_array);
+					relevantStackPtr = stackPtr + 5;							// discard uninteresting registers, keep LR PC PSR
+#elif RRF_HOST_BUILD
+					relevantStackPtr = nullptr;
 #else
 					__asm volatile("mrs r2, psp");
 					register const uint32_t *_ecv_array stackPtr asm ("r2");	// we want the PSP not the MSP
-#endif
 					relevantStackPtr = stackPtr + 5;							// discard uninteresting registers, keep LR PC PSR
+#endif
 				}
 				else
 				{
@@ -1605,7 +1614,7 @@ OutputBuffer *_ecv_null RepRap::GetStatusResponse(uint8_t type, ResponseSource s
 				mountedCards |= (1u << i);
 			}
 		}
-		response->catf(",\"volumes\":%u,\"mountedVolumes\":%u", MassStorage::GetNumVolumes(), mountedCards);
+		response->catf(",\"volumes\":%zu,\"mountedVolumes\":%zu", MassStorage::GetNumVolumes(), mountedCards);
 #endif
 
 		// Machine mode and name
@@ -1982,9 +1991,12 @@ OutputBuffer *_ecv_null RepRap::GetLegacyStatusResponse(uint8_t type, int seq) c
 	{
 		// Add the static fields
 		response->catf(",\"geometry\":\"%s\",\"axes\":%u,\"totalAxes\":%u,\"axisNames\":\"%s\",\"volumes\":%u,\"numTools\":%u,\"myName\":\"%.s\",\"firmwareName\":\"%.s\"",
-						move->GetGeometryString(), numVisibleAxes, gCodes->GetTotalAxes(), gCodes->GetAxisLetters(),
+						move->GetGeometryString(),
+						static_cast<unsigned int>(numVisibleAxes),
+						static_cast<unsigned int>(gCodes->GetTotalAxes()),
+						gCodes->GetAxisLetters(),
 #if HAS_MASS_STORAGE || HAS_EMBEDDED_FILES
-							MassStorage::GetNumVolumes(),
+							static_cast<unsigned int>(MassStorage::GetNumVolumes()),
 #else
 							0,
 #endif
@@ -2346,7 +2358,7 @@ GCodeResult RepRap::GetFileInfoResponse(c_string _ecv_null filename, OutputBuffe
 
 	if (info.isValid)
 	{
-		response->printf("{\"err\":0,\"fileName\":\"%.s\",\"size\":%lu,", ((specificFile) ? filename : printMonitor->GetPrintingFilename()), info.fileSize);
+				response->printf("{\"err\":0,\"fileName\":\"%.s\",\"size\":%lu,", ((specificFile) ? filename : printMonitor->GetPrintingFilename()), static_cast<unsigned long>(info.fileSize));
 		tm timeInfo;
 		gmtime_r(&info.lastModifiedTime, &timeInfo);
 		if (timeInfo.tm_year > /*19*/80)
@@ -2772,8 +2784,10 @@ void RepRap::PrepareToLoadIap() noexcept
 	DuetExpansion::Exit();					// stop the DueX polling task
 #endif
 	StopAnalogTask();
+#if SUPPORT_USB
 	serialUSB.end();
 	StopUsbTask();
+#endif
 
 	Cache::Disable();						// disable the cache because it interferes with flash memory access
 
@@ -2796,6 +2810,18 @@ void RepRap::PrepareToLoadIap() noexcept
 	delay(1000);							// give it time to send the message
 #endif
 }
+
+#if RRF_HOST_BUILD
+
+// Run the IAP. Host build can't jump into the embedded IAP image, so warn and return.
+void RepRap::StartIap(c_string _ecv_null filename) noexcept
+{
+	(void)filename;
+	platform->Message(FirmwareUpdateMessage, "Host build: IAP execution not supported\n");
+	std::abort();
+}
+
+#else
 
 // Run the IAP. We have already disabled the cache and MPU and loaded the IAP into RAM.
 void RepRap::StartIap(c_string _ecv_null filename) noexcept
@@ -2878,6 +2904,8 @@ void RepRap::StartIap(c_string _ecv_null filename) noexcept
 	__asm volatile ("bx r1");
 	for (;;) { }							// to keep gcc happy
 }
+
+#endif
 
 // Helper function for diagnostic tests in Platform.cpp, to cause a deliberate divide-by-zero
 /*static*/ uint32_t RepRap::DoDivide(uint32_t a, uint32_t b) noexcept
