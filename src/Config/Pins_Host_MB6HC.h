@@ -24,6 +24,7 @@ enum class PwmOutput : uint8_t
 #define IAP_UPDATE_FILE         "Duet3_SDiap_host.bin"
 #define IAP_UPDATE_FILE_SBC     "Duet3_SBCiap_host.bin"
 #define IAP_CAN_LOADER_FILE     "Duet3_CANiap_host.bin"
+#define USART_SPI                1
 constexpr uint32_t IAP_IMAGE_START = 0;
 
 constexpr std::size_t NumDirectDrivers = 6;

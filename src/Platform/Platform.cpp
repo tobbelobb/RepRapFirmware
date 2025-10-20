@@ -24,8 +24,8 @@
 #include <Devices.h>
 #include <Heating/Heat.h>
 #include <Movement/DDA.h>
-#include <Movement/Move.h>
 #include <Movement/StepTimer.h>
+#include <Movement/Move.h>
 #include <Tools/Tool.h>
 #include <Endstops/ZProbe.h>
 #include <Networking/Network.h>
@@ -2061,6 +2061,11 @@ GCodeResult Platform::DiagnosticTest(GCodeBuffer& gb, const StringRef& reply, Ou
 			);
 		break;
 
+#if RRF_HOST_BUILD
+	case (unsigned int)DiagnosticTestType::PrintObjectAddresses:
+		MessageF(MessageType::GenericMessage, "Object address diagnostics unavailable in host build\n");
+		break;
+#else
 	case (unsigned int)DiagnosticTestType::PrintObjectAddresses:
 		MessageF(MessageType::GenericMessage,
 					"Platform %08" PRIx32 "-%08" PRIx32
@@ -2109,6 +2114,7 @@ GCodeResult Platform::DiagnosticTest(GCodeBuffer& gb, const StringRef& reply, Ou
 #endif
 				);
 		break;
+#endif
 
 	case (unsigned int)DiagnosticTestType::TimeCRC32:
 		{

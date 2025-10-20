@@ -142,20 +142,6 @@
 #endif
 #define SUPPORT_CAN_FD 1
 
-#ifdef NumDmaChannelsUsed
-# undef NumDmaChannelsUsed
-#endif
-#define NumDmaChannelsUsed 0
-
-#ifdef NumDmaChannelsSupported
-# undef NumDmaChannelsSupported
-#endif
-#define NumDmaChannelsSupported 0
-
-#ifdef SUPPORT_SBC_INTERFACE
-# undef SUPPORT_SBC_INTERFACE
-#endif
-#define SUPPORT_SBC_INTERFACE 0
 #ifdef HAS_VREF_MONITOR
 # undef HAS_VREF_MONITOR
 #endif
