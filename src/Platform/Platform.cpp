@@ -2140,7 +2140,7 @@ GCodeResult Platform::DiagnosticTest(GCodeBuffer& gb, const StringRef& reply, Ou
 			now1 &= 0x00FFFFFF;
 			now2 &= 0x00FFFFFF;
 			uint32_t tim1 = ((now1 > now2) ? now1 : now1 + (SysTick->LOAD & 0x00FFFFFF) + 1) - now2;
-			reply.printf("CRC of %u bytes took %.2fus", length, (double)((1'000'000.0f * (float)tim1)/(float)SystemCoreClock));
+			reply.printf("CRC of %lu bytes took %.2fus", static_cast<unsigned long>(length), (double)((1'000'000.0f * (float)tim1)/(float)SystemCoreClock));
 		}
 		break;
 
@@ -2399,7 +2399,7 @@ GCodeResult Platform::HandleM575(GCodeBuffer& gb, const StringRef& reply) THROWS
 		const AuxMode mode = GetChannelMode(chan);
 		if (mode == AuxMode::disabled)
 		{
-			reply.printf("Channel %u is disabled", chan);
+			reply.printf("Channel %u is disabled", static_cast<unsigned int>(chan));
 		}
 		else
 		{
@@ -2413,7 +2413,12 @@ GCodeResult Platform::HandleM575(GCodeBuffer& gb, const StringRef& reply) THROWS
 #if HAS_AUX_DEVICES
 			if (chan != 0)
 			{
-				reply.printf("Channel %u (Aux %u): baud rate %" PRIu32 ", %s mode, ", chan, chan - 1, GetBaudRate(chan), modeString);
+				reply.printf(
+					"Channel %u (Aux %u): baud rate %" PRIu32 ", %s mode, ",
+					static_cast<unsigned int>(chan),
+					static_cast<unsigned int>(chan - 1),
+					GetBaudRate(chan),
+					modeString);
 				if (mode == AuxMode::device)
 				{
 # if SUPPORT_MODBUS_RTU

@@ -19,7 +19,11 @@
 #include "Kinematics/Kinematics.h"
 #include "MoveSegment.h"
 #include "DriveMovement.h"
-#include "StepTimer.h"
+#if RRF_HOST_BUILD
+# include <Movement/StepTimer.h>
+#else
+# include "StepTimer.h"
+#endif
 #include <GCodes/RestorePoint.h>
 #include <Math/Deviation.h>
 #include <Hardware/IoPorts.h>
