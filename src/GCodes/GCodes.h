@@ -22,6 +22,37 @@ Licence: GPL
 #ifndef GCODES_H
 #define GCODES_H
 
+#ifdef RRF_HOST_BUILD
+
+#include <cstdint>
+
+#include <General/StringRef.h>
+#include <GCodeResult.h>
+
+class Platform;
+class GCodeBuffer;
+
+enum class MachineType : uint8_t
+{
+	fff = 0,
+	laser = 1,
+	cnc = 2
+};
+
+class GCodes
+{
+public:
+	explicit GCodes(Platform&) noexcept {}
+
+	MachineType GetMachineType() const noexcept { return MachineType::fff; }
+	const char* GetAxisLetters() const noexcept { return "XYZABC"; }
+
+	void AbortPrint(GCodeBuffer&) noexcept {}
+	void HandleReply(GCodeBuffer&, GCodeResult, const char*) noexcept {}
+};
+
+#else
+
 #include "RepRapFirmware.h"
 #include <Platform/RepRap.h>			// for type ResponseSource
 #include "ObjectTracker.h"
@@ -880,5 +911,7 @@ inline void GCodes::GrabMovement(const GCodeBuffer& gb) noexcept
 #endif
 
 //*****************************************************************************************************
+
+#endif // RRF_HOST_BUILD
 
 #endif
