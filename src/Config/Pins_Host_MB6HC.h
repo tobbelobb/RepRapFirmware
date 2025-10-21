@@ -48,11 +48,19 @@ constexpr std::size_t NumTmcDriversSenseChannels = 1;
 constexpr std::size_t MinAxes = 3;
 constexpr std::size_t MaxAxes = 30;
 constexpr std::size_t MaxDriversPerAxis = 8;
-constexpr std::size_t MaxExtruders = 20;
-constexpr std::size_t MaxAxesPlusExtruders = 32;
+constexpr std::size_t MaxExtruders = 8;
+constexpr std::size_t MaxAxesPlusExtruders = 12;
 constexpr std::size_t MaxHeatersPerTool = 20;
 constexpr std::size_t MaxExtrudersPerTool = 12;
 constexpr unsigned int MaxTriggers = 32;
+
+constexpr std::size_t MaxHeaters = 8;
+constexpr std::size_t MaxFans = 8;
+constexpr std::size_t MaxSensors = 8;
+constexpr std::size_t MaxGpInPorts = 8;
+constexpr std::size_t MaxGpOutPorts = 8;
+constexpr std::size_t MaxSpindles = 2;
+constexpr std::size_t MaxZProbes = 1;
 
 constexpr unsigned int NumSerialChannels = 3;
 constexpr unsigned int FirstAuxChannel = 1;
@@ -66,6 +74,9 @@ inline constexpr Pin TmcCsPins[NumDirectDrivers] = { NoPin, NoPin, NoPin, NoPin,
 inline constexpr Pin SpiSdCsPin = NoPin;
 inline constexpr Pin DiagPins[NumDirectDrivers] = { NoPin, NoPin, NoPin, NoPin, NoPin, NoPin };
 inline constexpr Pin EndstopPins[6] = { NoPin, NoPin, NoPin, NoPin, NoPin, NoPin };
+
+constexpr std::size_t NumNamedPins = 1;
+inline constexpr Pin PinTable[NumNamedPins] = { NoPin };
 
 constexpr std::size_t NumSdCards = 2;
 inline constexpr Pin SdCardDetectPins[NumSdCards] = { NoPin, NoPin };
@@ -110,8 +121,6 @@ inline constexpr float PowerMonitorVoltageRange_v102 = 0.0f;
 inline constexpr float PowerMonitorVoltageRange_v101 = 0.0f;
 
 inline constexpr Pin UsbVBusPin = NoPin;
-
-inline constexpr std::size_t NumNamedPins = 0;
 
 #define SERIAL_MAIN_DEVICE serialUSB
 #define SERIAL_AUX_DEVICE serialUart1
