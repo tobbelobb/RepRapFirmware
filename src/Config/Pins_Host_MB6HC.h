@@ -5,6 +5,7 @@
 #include <CoreTypes.h>
 #include <PinDescription.h>
 #include <Duet3Common.h>
+#include <type_traits>
 
 enum class TcOutput : uint8_t
 {
@@ -118,3 +119,34 @@ inline constexpr Pin UsbVBusPin = NoPin;
 #define SERIAL_MAIN_DEVICE serialUSB
 #define SERIAL_AUX_DEVICE serialUart1
 #define SERIAL_AUX2_DEVICE serialUart2
+
+namespace StepPins
+{
+	namespace detail
+	{
+		inline constexpr uint32_t CalcBitmapFromIndex(size_t driver) noexcept
+		{
+			return (driver < 32) ? (1u << driver) : 0u;
+		}
+	}
+
+	template <typename DriverLike>
+	inline constexpr uint32_t CalcDriverBitmap(const DriverLike& driver) noexcept
+	{
+		if constexpr (std::is_integral_v<DriverLike>)
+		{
+			return detail::CalcBitmapFromIndex(static_cast<size_t>(driver));
+		}
+		else
+		{
+			return detail::CalcBitmapFromIndex(static_cast<size_t>(driver.localDriver));
+		}
+	}
+
+	inline constexpr uint32_t AllDriversBitmap = (NumDirectDrivers >= 32)
+		? 0xFFFFFFFFu
+		: ((NumDirectDrivers == 0) ? 0u : ((1u << NumDirectDrivers) - 1u));
+
+	inline void StepDriversHigh(uint32_t) noexcept {}
+	inline void StepDriversLow(uint32_t) noexcept {}
+}
