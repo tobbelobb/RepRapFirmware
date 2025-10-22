@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <CoreTypes.h>
 #include <PinDescription.h>
+#include <Duet3Common.h>
 
 enum class TcOutput : uint8_t
 {
@@ -53,14 +54,6 @@ constexpr std::size_t MaxAxesPlusExtruders = 12;
 constexpr std::size_t MaxHeatersPerTool = 20;
 constexpr std::size_t MaxExtrudersPerTool = 12;
 constexpr unsigned int MaxTriggers = 32;
-
-constexpr std::size_t MaxHeaters = 8;
-constexpr std::size_t MaxFans = 8;
-constexpr std::size_t MaxSensors = 8;
-constexpr std::size_t MaxGpInPorts = 8;
-constexpr std::size_t MaxGpOutPorts = 8;
-constexpr std::size_t MaxSpindles = 2;
-constexpr std::size_t MaxZProbes = 1;
 
 constexpr unsigned int NumSerialChannels = 3;
 constexpr unsigned int FirstAuxChannel = 1;
