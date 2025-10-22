@@ -292,7 +292,11 @@ public:
 	void RestartFrom(FilePosition pos) noexcept;
 
 #if HAS_MASS_STORAGE || HAS_EMBEDDED_FILES
+#if (HAS_MASS_STORAGE || HAS_EMBEDDED_FILES) && !RRF_HOST_BUILD
 	FileGCodeInput *_ecv_null GetFileInput() const noexcept { return fileInput; }
+#else
+	FileGCodeInput *_ecv_null GetFileInput() const noexcept { return nullptr; }
+#endif
 #endif
 	GCodeInput *_ecv_from _ecv_null GetNormalInput() const noexcept { return (disabled) ? nullptr : normalInput; }
 
@@ -332,7 +336,9 @@ private:
 	GCodeInput *_ecv_from normalInput;					// Our normal input stream, or nullptr if there isn't one
 
 #if HAS_MASS_STORAGE || HAS_EMBEDDED_FILES
+#if (HAS_MASS_STORAGE || HAS_EMBEDDED_FILES) && !RRF_HOST_BUILD
 	FileGCodeInput *_ecv_null fileInput;				// Our file input stream for when we are reading from a print file or a macro file, may be shared with other GCodeBuffers
+#endif
 #endif
 
 	const MessageType responseMessageType;				// The message type we use for responses to string codes coming from this channel

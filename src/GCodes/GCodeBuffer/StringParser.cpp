@@ -1215,7 +1215,11 @@ FilePosition StringParser::GetFilePosition() const noexcept
 	   )
 	{
 		const FileData &file = ms->fileState;
-		return file.GetPosition() - gb.fileInput->FileBytesCached(file) - commandLength + commandStart;
+#if (HAS_MASS_STORAGE || HAS_EMBEDDED_FILES) && !RRF_HOST_BUILD
+	return file.GetPosition() - gb.fileInput->FileBytesCached(file) - commandLength + commandStart;
+#else
+	return file.GetPosition() - commandLength + commandStart;
+#endif
 	}
 #endif
 	return noFilePosition;
