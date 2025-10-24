@@ -368,6 +368,9 @@ public:
 	bool SetKinematics(const char *_ecv_array _ecv_null name, int legacyType) noexcept;		// Set kinematics, return true if successful
 	MovementError CartesianToMotorSteps(const float machinePos[MaxAxes], int32_t motorPos[MaxAxes], bool isCoordinated) const noexcept;
 																							// Convert Cartesian coordinates to motor coordinates, return true if successful
+#ifdef RRF_HOST_BUILD
+	void ConfigureSegmentation(float segmentsPerSecond, float minSegmentLength) noexcept;
+#endif
 	void MotorStepsToCartesian(const int32_t motorPos[], size_t numVisibleAxes, size_t numTotalAxes, float machinePos[]) const noexcept;
 																							// Convert motor coordinates to machine coordinates
 	const char *_ecv_array GetGeometryString() const noexcept { return kinematics->GetName(); }
