@@ -717,14 +717,14 @@ void ObjectModel::ReportArrayLengthAsJson(OutputBuffer *buf, ObjectExplorationCo
 	case TypeCode::ObjectModelArray:
 		{
 			const ObjectModelArrayTableEntry *const entry = _ecv_not_null(val.omVal->GetObjectModelArrayEntry(val.param & 0xFF));
-			buf->catf("%u", entry->GetNumElements(this, context));
+			buf->catf("%zu", entry->GetNumElements(this, context));
 		}
 		break;
 
 	case TypeCode::HeapArray:
 		{
 			ReadLocker lock(Heap::heapLock);				// must have a read lock on heapLock when calling GetNumElements or GetElement
-			buf->catf("%u", val.ahVal.GetNumElements());
+			buf->catf("%zu", val.ahVal.GetNumElements());
 		}
 		break;
 
@@ -740,11 +740,11 @@ void ObjectModel::ReportArrayLengthAsJson(OutputBuffer *buf, ObjectExplorationCo
 #endif
 
 	case TypeCode::CString:
-		buf->catf("%u", strlen(val.sVal));
+		buf->catf("%zu", strlen(val.sVal));
 		break;
 
 	case TypeCode::HeapString:
-		buf->catf("%u", val.shVal.GetLength());
+		buf->catf("%zu", val.shVal.GetLength());
 		break;
 
 	default:

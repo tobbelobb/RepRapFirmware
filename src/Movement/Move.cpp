@@ -1025,7 +1025,7 @@ void Move::Diagnostics(unsigned int part, const StringRef& reply) noexcept
 		// Show the driver diagnostics. We can fit 4 in each response. Duet 2 has 12 drivers so we need up to 3 responses.
 		for (size_t drive = 4 * (part - 1); drive < min<size_t>(NumDirectDrivers, 4 * part); ++drive)
 		{
-			reply.lcatf("Driver %u: ", drive);
+			reply.lcatf("Driver %zu: ", drive);
 #ifdef DUET3_MB6XD
 			reply.cat((HasDriverError(drive)) ? "error" : "ok");
 #elif HAS_SMART_DRIVERS

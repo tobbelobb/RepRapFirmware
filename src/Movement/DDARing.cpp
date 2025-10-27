@@ -117,7 +117,7 @@ GCodeResult DDARing::ConfigureMovementQueue(GCodeBuffer& gb, const StringRef& re
 			const ptrdiff_t memoryAvailable = Tasks::GetNeverUsedRam();
 			if (memoryNeeded >= memoryAvailable)
 			{
-				reply.printf("insufficient RAM (available %d, needed %" PRIu64 ")", memoryAvailable, memoryNeeded);
+				reply.printf("insufficient RAM (available %td, needed %" PRIu64 ")", memoryAvailable, memoryNeeded);
 				return GCodeResult::error;
 			}
 

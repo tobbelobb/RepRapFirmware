@@ -476,7 +476,7 @@ bool OutputBuffer::WriteToFile(FileData& f) const noexcept
 
 /*static*/ void OutputBuffer::Diagnostics(const StringRef& reply) noexcept
 {
-	reply.lcatf("Used output buffers: %d of %d (%d max)", usedOutputBuffers, OUTPUT_BUFFER_COUNT, maxUsedOutputBuffers);
+	reply.lcatf("Used output buffers: %zu of %zu (%zu max)", usedOutputBuffers, OUTPUT_BUFFER_COUNT, maxUsedOutputBuffers);
 }
 
 //*************************************************************************************************
