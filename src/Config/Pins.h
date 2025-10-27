@@ -3,12 +3,6 @@
 
 // Load Pins_<platform>.h
 
-#if defined(RRF_HOST_BUILD)
-
-# include "Pins_Host_MB6HC.h"
-
-#else
-
 # if !defined(PLATFORM)
 #  if defined(__SAM4E8E__)
 #   define PLATFORM DuetNG
@@ -44,8 +38,6 @@
 # endif
 
 # include P_INCLUDE_FILE
-
-#endif	// RRF_HOST_BUILD
 
 // Apply default values to anything not configured
 #ifndef SUPPORT_NONLINEAR_EXTRUSION
