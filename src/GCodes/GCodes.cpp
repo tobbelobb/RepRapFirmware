@@ -3529,7 +3529,7 @@ void GCodes::HandleM114(GCodeBuffer& gb, const StringRef& s) const noexcept
 	// Now the extruder coordinates
 	for (size_t i = 0; i < numExtruders; i++)
 	{
-		s.catf("E%u:%.1f ", i, (double)ms.LiveMachineCoordinate(ExtruderToLogicalDrive(i)));
+		s.catf("E%zu:%.1f ", i, (double)ms.LiveMachineCoordinate(ExtruderToLogicalDrive(i)));
 	}
 
 	// Print the axis stepper motor positions as Marlin does, as an aid to debugging.
@@ -5039,7 +5039,7 @@ void GCodes::GenerateTemperatureReport(const GCodeBuffer& gb, const StringRef& r
 		}
 		else
 		{
-			reply.catf(" B%u:", hn);
+			reply.catf(" B%zu:", hn);
 		}
 		const int8_t heater = heat.GetBedHeater(hn);
 		reply.catf("%.1f /%.1f", (double)heat.GetHeaterTemperature(heater), (double)heat.GetTargetTemperature(heater));
@@ -5057,7 +5057,7 @@ void GCodes::GenerateTemperatureReport(const GCodeBuffer& gb, const StringRef& r
 		}
 		else
 		{
-			reply.catf(" C%u:", hn);
+			reply.catf(" C%zu:", hn);
 		}
 		const int8_t heater = heat.GetChamberHeater(hn);
 		reply.catf("%.1f /%.1f", (double)heat.GetHeaterTemperature(heater), (double)heat.GetTargetTemperature(heater));
