@@ -244,7 +244,7 @@ bool GCodes::WriteWorkplaceCoordinates(FileStore *f) const noexcept
 	for (size_t cs = 0; cs < NumCoordinateSystems; ++cs)
 	{
 		String<StringLength100> scratchString;
-		scratchString.printf("G10 L2 P%u", cs + 1);
+		scratchString.printf("G10 L2 P%zu", cs + 1);
 		for (size_t axis = 0; axis < numVisibleAxes; ++axis)
 		{
 			scratchString.catf(" %c%.2f", axisLetters[axis], (double)workplaceCoordinates[cs][axis]);
@@ -644,7 +644,7 @@ GCodeResult GCodes::DoDriveMapping(GCodeBuffer& gb, const StringRef& reply) THRO
 	{
 		reply.cat(" none");
 	}
-	reply.catf(", %u axes visible", numVisibleAxes);
+	reply.catf(", %zu axes visible", numVisibleAxes);
 	return GCodeResult::ok;
 }
 
