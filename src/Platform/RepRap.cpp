@@ -2784,8 +2784,10 @@ void RepRap::PrepareToLoadIap() noexcept
 	DuetExpansion::Exit();					// stop the DueX polling task
 #endif
 	StopAnalogTask();
+#if SUPPORT_USB
 	serialUSB.end();
 	StopUsbTask();
+#endif
 
 	Cache::Disable();						// disable the cache because it interferes with flash memory access
 
