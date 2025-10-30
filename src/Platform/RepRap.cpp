@@ -1614,7 +1614,7 @@ OutputBuffer *_ecv_null RepRap::GetStatusResponse(uint8_t type, ResponseSource s
 				mountedCards |= (1u << i);
 			}
 		}
-		response->catf(",\"volumes\":%u,\"mountedVolumes\":%u", static_cast<unsigned int>(MassStorage::GetNumVolumes()), static_cast<unsigned int>(mountedCards));
+		response->catf(",\"volumes\":%zu,\"mountedVolumes\":%zu", MassStorage::GetNumVolumes(), mountedCards);
 #endif
 
 		// Machine mode and name
