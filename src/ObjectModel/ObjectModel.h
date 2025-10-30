@@ -36,6 +36,10 @@ class ObjectModelArrayTableEntry;
 class ObjectModelTableEntry;
 class IoPort;
 class UniqueId;
+#if RRF_HOST_BUILD
+class Platform;
+const ObjectModel *_ecv_null PlatformAsObjectModel(const Platform* platform) noexcept;
+#endif
 
 // Encapsulated time_t, used to facilitate overloading the ExpressionValue constructor
 struct DateTime
@@ -88,6 +92,9 @@ struct ExpressionValue final
 	explicit ExpressionValue(uint64_t u) noexcept : type((uint32_t)TypeCode::Uint64) { Set56BitValue(u); }
 	explicit constexpr ExpressionValue(const ObjectModel *_ecv_from _ecv_null om) noexcept : type((om == nullptr) ? (uint32_t)TypeCode::None : (uint32_t)TypeCode::ObjectModel_tc), param(0), omVal(om) { }
 	constexpr ExpressionValue(const ObjectModel *_ecv_from _ecv_null om, uint8_t tableNumber) noexcept : type((om == nullptr) ? (uint32_t)TypeCode::None : (uint32_t)TypeCode::ObjectModel_tc), param(tableNumber), omVal(om) { }
+#if RRF_HOST_BUILD
+	ExpressionValue(const Platform* platform, uint8_t tableNumber) noexcept : ExpressionValue(PlatformAsObjectModel(platform), tableNumber) { }
+#endif
 	constexpr ExpressionValue(const ObjectModel *_ecv_from om, uint8_t arrayNumber, bool dummy) noexcept : type((uint32_t)TypeCode::ObjectModelArray), param(arrayNumber), omVal(om) { }
 	explicit constexpr ExpressionValue(const char *_ecv_array s) noexcept : type((uint32_t)TypeCode::CString), param(0), sVal(s) { }
 	explicit constexpr ExpressionValue(IPAddress ip) noexcept : type((uint32_t)TypeCode::IPAddress_tc), param(0), uVal(ip.GetV4LittleEndian()) { }

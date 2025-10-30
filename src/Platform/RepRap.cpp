@@ -1614,7 +1614,7 @@ OutputBuffer *_ecv_null RepRap::GetStatusResponse(uint8_t type, ResponseSource s
 				mountedCards |= (1u << i);
 			}
 		}
-		response->catf(",\"volumes\":%u,\"mountedVolumes\":%u", MassStorage::GetNumVolumes(), mountedCards);
+		response->catf(",\"volumes\":%u,\"mountedVolumes\":%u", static_cast<unsigned int>(MassStorage::GetNumVolumes()), static_cast<unsigned int>(mountedCards));
 #endif
 
 		// Machine mode and name
@@ -1996,7 +1996,7 @@ OutputBuffer *_ecv_null RepRap::GetLegacyStatusResponse(uint8_t type, int seq) c
 						static_cast<unsigned int>(gCodes->GetTotalAxes()),
 						gCodes->GetAxisLetters(),
 #if HAS_MASS_STORAGE || HAS_EMBEDDED_FILES
-							MassStorage::GetNumVolumes(),
+							static_cast<unsigned int>(MassStorage::GetNumVolumes()),
 #else
 							0,
 #endif
