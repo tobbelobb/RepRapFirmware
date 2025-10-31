@@ -693,7 +693,7 @@ GCodeResult GCodes::StraightProbe(GCodeBuffer& gb, const StringRef& reply) THROW
 	// Check if this probe exists to not run into a nullptr dereference later
 	if (platform.GetEndstops().GetZProbe(probeToUse).IsNull())
 	{
-		reply.catf("Invalid probe number: %d", probeToUse);
+		reply.catf("Invalid probe number: %zu", probeToUse);
 		return GCodeResult::error;
 	}
 	straightProbeSettings.SetZProbeToUse(probeToUse);
