@@ -102,7 +102,7 @@ GCodeBuffer::GCodeBuffer(GCodeChannel::RawType channel, GCodeInput *_ecv_from no
 	:
 	  printFilePositionAtMacroStart(0),
 	  normalInput(normalIn),
-#if (HAS_MASS_STORAGE || HAS_EMBEDDED_FILES) && !RRF_HOST_BUILD
+#if HAS_MASS_STORAGE || HAS_EMBEDDED_FILES
 	  fileInput(fileIn),
 #endif
 	  responseMessageType(mt),
@@ -1054,9 +1054,7 @@ void GCodeBuffer::AbortFile(bool abortAll) noexcept
 				if (!reprap.UsingSbcInterface())
 # endif
 				{
-#if (HAS_MASS_STORAGE || HAS_EMBEDDED_FILES) && !RRF_HOST_BUILD
 					fileInput->Reset(machineState->fileState);
-#endif
 				}
 #endif
 				machineState->CloseFile();
@@ -1342,9 +1340,7 @@ void GCodeBuffer::RestartFrom(FilePosition pos) noexcept
 #if HAS_MASS_STORAGE || HAS_EMBEDDED_FILES
 	if (machineState->fileState.IsLive())
 	{
-#if (HAS_MASS_STORAGE || HAS_EMBEDDED_FILES) && !RRF_HOST_BUILD
-	fileInput->Reset(machineState->fileState);		// clear the buffered data
-#endif
+		fileInput->Reset(machineState->fileState);		// clear the buffered data
 		machineState->fileState.Seek(pos);				// replay the abandoned instructions when we resume
 	}
 #endif
