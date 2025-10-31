@@ -4612,7 +4612,8 @@ void GCodes::StopPrint(GCodeBuffer *_ecv_null gbp, StopPrintReason reason) noexc
 		}
 
 		// Pronterface expects a "Done printing" message
-		if (UsbGCode()->LatestMachineState().compatibility == Compatibility::Marlin)
+		const GCodeBuffer *_ecv_null const usbGb = UsbGCode();
+		if (usbGb != nullptr && usbGb->LatestMachineState().compatibility == Compatibility::Marlin)
 		{
 			platform.Message(UsbMessage, "Done printing file\n");
 		}
