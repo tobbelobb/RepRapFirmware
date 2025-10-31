@@ -789,7 +789,7 @@ GCodeResult GCodes::ProbeTool(GCodeBuffer& gb, const StringRef& reply) THROWS(GC
 // Return true if successful, else SetError has been called to save the error message
 bool GCodes::SetupM585ProbingMove(GCodeBuffer& gb) noexcept
 {
-	bool reduceAcceleration;
+	bool reduceAcceleration = false;
 	if (m585Settings.useProbe)
 	{
 		const auto zp = platform.GetZProbeOrDefault(currentZProbeNumber);
