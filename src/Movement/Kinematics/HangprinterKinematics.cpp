@@ -344,26 +344,26 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 MovementError HangprinterKinematics::CartesianToMotorSteps(const float machinePos[], const float stepsPerMm[],
 													size_t numVisibleAxes, size_t numTotalAxes, int32_t motorPos[], bool isCoordinated) const noexcept
 {
-	float distances[numAnchors];
+	float distances[HANGPRINTER_MAX_ANCHORS];
 	for (size_t i = 0; i < numAnchors; ++i) {
 		distances[i] = hyp3(machinePos, anchors[i]);
 	}
 
-	float springKs[numAnchors];
+	float springKs[HANGPRINTER_MAX_ANCHORS];
 	for (size_t i = 0; i < numAnchors; ++i) {
 		springKs[i] = SpringK(distances[i] * mechanicalAdvantage[i] + guyWireLengths[i]);
 	}
 
-	float F[numAnchors] = { 0.0F }; // desired force in each direction
+	float F[HANGPRINTER_MAX_ANCHORS] = { 0.0F }; // desired force in each direction
 	StaticForces(machinePos, F);
 
-	float relaxedSpringLengths[numAnchors];
+	float relaxedSpringLengths[HANGPRINTER_MAX_ANCHORS];
 	for (size_t i{0}; i < numAnchors; ++i) {
 		relaxedSpringLengths[i] = distances[i] - F[i] / (springKs[i] * mechanicalAdvantage[i]);
 		// The second term there is the mover's movement in mm due to flex
 	}
 
-	float linePos[numAnchors];
+	float linePos[HANGPRINTER_MAX_ANCHORS];
 	for (size_t i = 0; i < numAnchors; ++i) {
 		linePos[i] = relaxedSpringLengths[i] - relaxedSpringLengthsOrigin[i];
 	}
