@@ -64,6 +64,17 @@ constexpr uint8_t HangprinterKinematics::objectModelTableDescriptor[] = { 1, 2 }
 
 DEFINE_GET_OBJECT_MODEL_TABLE_WITH_PARENT(HangprinterKinematics, RoundBedKinematics)
 
+Kinematics::KinematicsTypeDescriptor HangprinterKinematics::hangprinterKinematicsDescriptor(HangprinterKinematics::Create);
+
+/*static*/ Kinematics *_ecv_from _ecv_null HangprinterKinematics::Create(const char *_ecv_array _ecv_null name, int legacyNumber) noexcept
+{
+	if (MatchesLegacyType(name, legacyNumber, KinematicsType::hangprinter))
+	{
+		return new HangprinterKinematics();
+	}
+	return nullptr;
+}
+
 // Constructor
 HangprinterKinematics::HangprinterKinematics() noexcept
 	: RoundBedKinematics(KinematicsType::hangprinter, SegmentationType(true, true, true))
