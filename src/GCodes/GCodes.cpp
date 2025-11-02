@@ -854,6 +854,32 @@ void GCodes::EndSimulation(GCodeBuffer *null gb) noexcept
 	reprap.MoveUpdated();
 }
 
+#if RRF_HOST_BUILD
+void GCodes::HostForceSimulationMode(SimulationMode newMode) noexcept
+{
+	if (simulationMode == newMode)
+	{
+		return;
+	}
+
+	if (newMode == SimulationMode::off)
+	{
+		simulationMode = SimulationMode::off;
+		simulationTime = 0.0f;
+		reprap.GetMove().Simulate(SimulationMode::off);
+		return;
+	}
+
+	simulationMode = newMode;
+	simulationTime = 0.0f;
+	exitSimulationWhenFileComplete = false;
+	updateFileWhenSimulationComplete = false;
+	axesVirtuallyHomed = AxesBitmap::MakeLowestNBits(numVisibleAxes);
+	MovementState::SaveEndpointsBeforeSimulating();
+	reprap.GetMove().Simulate(newMode);
+}
+#endif
+
 // Check for and execute triggers
 void GCodes::CheckTriggers() noexcept
 {
