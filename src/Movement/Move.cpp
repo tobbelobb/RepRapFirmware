@@ -857,6 +857,15 @@ bool Move::WaitingForAllMovesFinished(MovementSystemNumber msNumber
 		return false;
 	}
 
+#ifdef RRF_HOST_BUILD
+	// In host simulation, moves are "finished" when the ring is empty
+	// No need to check for physical drive motion since we're not on real hardware
+	(void)msNumber;  // Suppress unused parameter warning
+#if SUPPORT_ASYNC_MOVES
+	(void)logicalDrivesOwned;
+#endif
+	return true;
+#else
 	// If input shaping is enabled then movement may continue for a little while longer
 #if SUPPORT_ASYNC_MOVES
 	return logicalDrivesOwned.IterateWhile([this](unsigned int axisOrExtruder, unsigned int) noexcept -> bool
@@ -874,6 +883,7 @@ bool Move::WaitingForAllMovesFinished(MovementSystemNumber msNumber
 	}
 #endif
 	return true;
+#endif
 }
 
 // Return the number of actually probed probe points
