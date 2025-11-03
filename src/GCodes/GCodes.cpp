@@ -597,10 +597,15 @@ bool GCodes::StartNextGCode(GCodeBuffer& gb, const StringRef& reply) noexcept
 		   )
 		{
 			// Delay 1 or 10 seconds, then try to open and run daemon.g. No error if it is not found.
+#ifndef RRF_HOST_BUILD
+			// Skip daemon delays in host simulation for deterministic timing
 			if (gb.DoDwellTime((daemonRunning) ? 10000 : 1000))
+#endif
 			{
 				daemonRunning = true;
+#ifndef RRF_HOST_BUILD
 				return DoFileMacro(gb, DAEMON_G, false, AsyncSystemMacroCode);
+#endif
 			}
 		}
 	}
