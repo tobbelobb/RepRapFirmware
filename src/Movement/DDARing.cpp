@@ -217,6 +217,13 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 {
 	DDA *cdda = getPointer;											// capture volatile variable
 
+#if RRF_HOST_BUILD
+  // On host we want to keep track of simulation time even when we're not running in simulation mode
+	if (cdda->IsCommitted() && simulationMode == SimulationMode::off)
+	{
+		simulationTime += (float)cdda->GetClocksNeeded() * (1.0/StepClockRate);
+	}
+#endif
 	// If we are simulating, simulate completion of the current move
 	if (simulationMode >= SimulationMode::normal)
 	{

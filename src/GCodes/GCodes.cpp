@@ -3705,6 +3705,17 @@ GCodeResult GCodes::DoDwell(GCodeBuffer& gb) THROWS(GCodeException)
 		return GCodeResult::ok;
 	}
 
+	#if RRF_HOST_BUILD
+	// On host we want to keep track of simulation time even when we're not running in simulation mode
+	if (  !IsSimulating()
+		&& &gb != DaemonGCode()
+		&& &gb != TriggerGCode()
+		&& (gb.IsFileChannel() || !exitSimulationWhenFileComplete)
+	   )
+	{
+		simulationTime += (float)dwell * 0.001;
+	}
+	#endif
 	if (   IsSimulating()															// if we are simulating then simulate the G4...
 		&& &gb != DaemonGCode()														// ...unless it comes from the daemon...
 		&& &gb != TriggerGCode()													// ...or a trigger...
