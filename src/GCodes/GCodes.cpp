@@ -41,6 +41,10 @@
 #include <Endstops/ZProbe.h>
 #include <ObjectModel/Variable.h>
 
+#if RRF_HOST_BUILD
+# include <HostTiming.h>
+#endif
+
 #if HAS_SBC_INTERFACE
 # include <SBC/SbcInterface.h>
 #endif
@@ -3705,6 +3709,11 @@ GCodeResult GCodes::DoDwell(GCodeBuffer& gb) THROWS(GCodeException)
 		return GCodeResult::ok;
 	}
 
+#if RRF_HOST_BUILD
+	const uint32_t dwellMillis = static_cast<uint32_t>(dwell);
+	const uint64_t dwellStepClocks = static_cast<uint64_t>(MillisToStepClocks(dwellMillis));
+#endif
+
 	#if RRF_HOST_BUILD
 	// On host we want to keep track of simulation time even when we're not running in simulation mode
 	if (  !IsSimulating()
@@ -3714,6 +3723,7 @@ GCodeResult GCodes::DoDwell(GCodeBuffer& gb) THROWS(GCodeException)
 	   )
 	{
 		simulationTime += (float)dwell * 0.001;
+		HostTiming::ReportSimulationClocks(dwellStepClocks);
 	}
 	#endif
 	if (   IsSimulating()															// if we are simulating then simulate the G4...
@@ -3723,6 +3733,9 @@ GCodeResult GCodes::DoDwell(GCodeBuffer& gb) THROWS(GCodeException)
 	   )
 	{
 		simulationTime += (float)dwell * 0.001;
+#if RRF_HOST_BUILD
+		HostTiming::ReportSimulationClocks(dwellStepClocks);
+#endif
 		return GCodeResult::ok;
 	}
 

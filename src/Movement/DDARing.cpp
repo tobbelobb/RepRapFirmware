@@ -18,6 +18,10 @@
 #include <GCodes/GCodeBuffer/GCodeBuffer.h>
 #include <Tools/Tool.h>
 
+#if RRF_HOST_BUILD
+# include <HostTiming.h>
+#endif
+
 #if SUPPORT_CAN_EXPANSION
 # include "CAN/CanMotion.h"
 #endif
@@ -221,7 +225,9 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
   // On host we want to keep track of simulation time even when we're not running in simulation mode
 	if (cdda->IsCommitted() && simulationMode == SimulationMode::off)
 	{
-		simulationTime += (float)cdda->GetClocksNeeded() * (1.0/StepClockRate);
+		const uint32_t clocksNeeded = cdda->GetClocksNeeded();
+		simulationTime += (float)clocksNeeded * (1.0/StepClockRate);
+		HostTiming::ReportSimulationClocks(clocksNeeded);
 	}
 #endif
 	// If we are simulating, simulate completion of the current move
@@ -230,7 +236,11 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 		// Simulate completion of one move
 		if (cdda->IsCommitted())
 		{
-			simulationTime += (float)cdda->GetClocksNeeded() * (1.0/StepClockRate);
+			const uint32_t clocksNeeded = cdda->GetClocksNeeded();
+			simulationTime += (float)clocksNeeded * (1.0/StepClockRate);
+#if RRF_HOST_BUILD
+			HostTiming::ReportSimulationClocks(clocksNeeded);
+#endif
 			++completedMoves;
 			if (cdda->Free())
 			{
