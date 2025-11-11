@@ -1153,7 +1153,21 @@ void DDA::Prepare(DDARing& ring,
 
 	// Decide when this move should start.
 	// Avoid setting the move start time in the past or with very little time before it starts, because this can lead to us trying to modify a segment that is already executing
-	const uint32_t now = StepTimer::GetMovementTimerTicks();
+	uint32_t now = StepTimer::GetMovementTimerTicks();
+#if RRF_HOST_BUILD
+	if (prev->state == committed)
+	{
+		const uint32_t prevEndTime = prev->afterPrepare.moveStartTime + prev->clocksNeeded;
+		const uint32_t minNow =
+			(prevEndTime > MoveTiming::AbsoluteMinimumPreparedTime)
+				? prevEndTime - MoveTiming::AbsoluteMinimumPreparedTime
+				: 0;
+		if (now > minNow)
+		{
+			now = minNow;
+		}
+	}
+#endif
 	if (prev->state == committed)
 	{
 		const uint32_t prevEndTime = prev->afterPrepare.moveStartTime + prev->clocksNeeded;

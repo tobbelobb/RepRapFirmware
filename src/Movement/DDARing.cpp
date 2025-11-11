@@ -222,14 +222,13 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 	DDA *cdda = getPointer;											// capture volatile variable
 
 #if RRF_HOST_BUILD
-  // On host we want to keep track of simulation time even when we're not running in simulation mode
-	if (cdda->IsCommitted() && simulationMode == SimulationMode::off)
+	if (cdda->IsCommitted() && !cdda->HasExpired())
 	{
-		const uint32_t clocksNeeded = cdda->GetClocksNeeded();
-		simulationTime += (float)clocksNeeded * (1.0/StepClockRate);
-		HostTiming::ReportSimulationClocks(clocksNeeded);
+		HostTiming::ClockTagScope clockScope(HostTiming::ClockStatKind::Simulation);
+		HostTiming::AdvanceStepClocks(static_cast<uint64_t>(cdda->GetClocksNeeded()));
 	}
 #endif
+
 	// If we are simulating, simulate completion of the current move
 	if (simulationMode >= SimulationMode::normal)
 	{
@@ -254,6 +253,11 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 		// See if we can retire any completed moves
 		while (cdda->IsCommitted() && cdda->HasExpired())
 		{
+#if RRF_HOST_BUILD
+			const uint32_t clocksNeeded = cdda->GetClocksNeeded();
+			simulationTime += (float)clocksNeeded * (1.0/StepClockRate);
+			HostTiming::ReportSimulationClocks(clocksNeeded);
+#endif
 			++completedMoves;
 			//debugPrintf("Retiring move: now=%" PRIu32 " start=%" PRIu32 " dur=%" PRIu32 "\n", StepTimer::GetMovementTimerTicks(), cdda->GetMoveStartTime(), cdda->GetClocksNeeded());
 			if (cdda->Free())
