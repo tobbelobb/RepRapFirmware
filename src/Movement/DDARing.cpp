@@ -312,6 +312,12 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 	}
 
 	// No DDA is committed, so commit a new one if possible
+#if RRF_HOST_BUILD
+	if (!cdda->IsCommitted() && cdda->IsProvisional() && completedMoves != 0)
+	{
+		shouldStartMove = true;									// after we've seen motion, keep time flowing even if millis() stalls
+	}
+#endif
 	if (   shouldStartMove											// if the Move code told us that we should start a move in any case...
 		|| waitingForRingToEmpty									// ...or GCodes is waiting for all moves to finish...
 		|| cdda->IsIsolatedMove()									// ...or checking endstops or another isolated move, so we can't schedule the following move
