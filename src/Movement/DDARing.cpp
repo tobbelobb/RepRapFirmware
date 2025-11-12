@@ -20,6 +20,8 @@
 
 #if RRF_HOST_BUILD
 # include <HostTiming.h>
+# include <iostream>
+# include <thread>
 #endif
 
 #if SUPPORT_CAN_EXPANSION
@@ -222,10 +224,32 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 	DDA *cdda = getPointer;											// capture volatile variable
 
 #if RRF_HOST_BUILD
-	if (cdda->IsCommitted() && !cdda->HasExpired())
+  auto const startTime = cdda->GetMoveStartTime();
+  auto const finishTime = cdda->GetMoveFinishTime();
+  auto const now = StepTimer::GetMovementTimerTicks();
+  //std::cout << " startTime: " << startTime << " finishTime: " << finishTime << " clocksNeeded: " << cdda->GetClocksNeeded() << " now: " << now << " IsCommitted(): " << cdda->IsCommitted() << '\n';
+  if (startTime > now && finishTime > now) {
+	  HostTiming::ClockTagScope clockScope(HostTiming::ClockStatKind::Simulation);
+	  HostTiming::AdvanceStepClocks(cdda->GetClocksNeeded());
+		HostTiming::AdvanceStepClocks(MoveTiming::UsualMinimumPreparedTime/2);
+    std::cout << "Added MoveTiming::UsualMinimumPreparedTime/2" << '\n';
+  }
+  else if (startTime < now && finishTime < now && cdda->IsCommitted()) {
+    auto const backOff = now - (startTime + finishTime)/2;
+		HostTiming::BackOffStepClocks(backOff);
+    std::cout << "Backed off " << backOff << '\n';
+  }
+  else if (now == 0 && startTime == 0 && finishTime != 0 && !cdda->IsCommitted()) {
+		HostTiming::ClockTagScope clockScope(HostTiming::ClockStatKind::Simulation);
+		HostTiming::AdvanceStepClocks(cdda->GetClocksNeeded());
+  }
+  else if((startTime < now && finishTime > now && cdda->IsCommitted()) ||
+          (startTime <= now && finishTime > now && cdda->IsCommitted()))
 	{
 		HostTiming::ClockTagScope clockScope(HostTiming::ClockStatKind::Simulation);
-		HostTiming::AdvanceStepClocks(static_cast<uint64_t>(cdda->GetClocksNeeded()));
+		HostTiming::AdvanceStepClocks(cdda->GetClocksNeeded());
+    //auto const diff = StepTimer::GetMovementTimerTicks() - (cdda->GetMoveStartTime() + cdda->GetClocksNeeded());
+    //std::cout << diff << '\n';
 	}
 #endif
 
@@ -243,6 +267,7 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 				++numLookaheadUnderruns;
 			}
 			getPointer = cdda = cdda->GetNext();
+      //std::cout << "Moving pointer 1" << '\n';
 		}
 	}
 	else
@@ -253,7 +278,7 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 #if RRF_HOST_BUILD
 			const uint32_t clocksNeeded = cdda->GetClocksNeeded();
 			simulationTime += (float)clocksNeeded * (1.0/StepClockRate);
-			//HostTiming::ReportSimulationClocks(clocksNeeded);
+			HostTiming::ReportSimulationClocks(clocksNeeded);
 #endif
 			++completedMoves;
 			//debugPrintf("Retiring move: now=%" PRIu32 " start=%" PRIu32 " dur=%" PRIu32 "\n", StepTimer::GetMovementTimerTicks(), cdda->GetMoveStartTime(), cdda->GetClocksNeeded());
@@ -262,6 +287,7 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 				++numLookaheadUnderruns;
 			}
 			getPointer = cdda = cdda->GetNext();
+      //std::cout << "Moving pointer 2" << '\n';
 		}
 	}
 
