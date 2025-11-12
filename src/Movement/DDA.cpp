@@ -1171,28 +1171,30 @@ void DDA::Prepare(DDARing& ring,
 	if (prev->state == committed)
 	{
 		const uint32_t prevEndTime = prev->afterPrepare.moveStartTime + prev->clocksNeeded;
+#if RRF_HOST_BUILD
+		// In simulation, always start moves immediately after the previous move ends
+		// No preparation buffer needed since time is virtual
+		afterPrepare.moveStartTime = prevEndTime;
+#else
 		if ((int32_t)(prevEndTime - now) >= (int32_t)MoveTiming::AbsoluteMinimumPreparedTime)
 		{
 			afterPrepare.moveStartTime = prevEndTime;		// start this move directly after the previous one
 		}
 		else if (startSpeed == 0.0)
 		{
-#if RRF_HOST_BUILD
-			afterPrepare.moveStartTime = now;  // In simulation, start immediately
-#else
 			afterPrepare.moveStartTime = now + prepareAdvanceTime;
-#endif
 		}
 		else
 		{
 			afterPrepare.moveStartTime = now + MoveTiming::AbsoluteMinimumPreparedTime;
 			reprap.GetMove().AddPrepareHiccup();		// move was supposed to follow the previous one directly, so record a hiccup
 		}
+#endif
 	}
 	else
 	{
 #if RRF_HOST_BUILD
-		afterPrepare.moveStartTime = now;  // In simulation, start immediately
+		afterPrepare.moveStartTime = now;  // In simulation, start immediately (no previous move)
 #else
 		afterPrepare.moveStartTime = now + prepareAdvanceTime;
 #endif
