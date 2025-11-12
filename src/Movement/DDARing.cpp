@@ -223,36 +223,6 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 {
 	DDA *cdda = getPointer;											// capture volatile variable
 
-#if RRF_HOST_BUILD
-  auto const startTime = cdda->GetMoveStartTime();
-  auto const finishTime = cdda->GetMoveFinishTime();
-  auto const now = StepTimer::GetMovementTimerTicks();
-  //std::cout << " startTime: " << startTime << " finishTime: " << finishTime << " clocksNeeded: " << cdda->GetClocksNeeded() << " now: " << now << " IsCommitted(): " << cdda->IsCommitted() << '\n';
-  if (startTime > now && finishTime > now) {
-	  HostTiming::ClockTagScope clockScope(HostTiming::ClockStatKind::Simulation);
-	  HostTiming::AdvanceStepClocks(cdda->GetClocksNeeded());
-		HostTiming::AdvanceStepClocks(MoveTiming::UsualMinimumPreparedTime/2);
-    std::cout << "Added MoveTiming::UsualMinimumPreparedTime/2" << '\n';
-  }
-  else if (startTime < now && finishTime < now && cdda->IsCommitted()) {
-    auto const backOff = now - (startTime + finishTime)/2;
-		HostTiming::BackOffStepClocks(backOff);
-    std::cout << "Backed off " << backOff << '\n';
-  }
-  else if (now == 0 && startTime == 0 && finishTime != 0 && !cdda->IsCommitted()) {
-		HostTiming::ClockTagScope clockScope(HostTiming::ClockStatKind::Simulation);
-		HostTiming::AdvanceStepClocks(cdda->GetClocksNeeded());
-  }
-  else if((startTime < now && finishTime > now && cdda->IsCommitted()) ||
-          (startTime <= now && finishTime > now && cdda->IsCommitted()))
-	{
-		HostTiming::ClockTagScope clockScope(HostTiming::ClockStatKind::Simulation);
-		HostTiming::AdvanceStepClocks(cdda->GetClocksNeeded());
-    //auto const diff = StepTimer::GetMovementTimerTicks() - (cdda->GetMoveStartTime() + cdda->GetClocksNeeded());
-    //std::cout << diff << '\n';
-	}
-#endif
-
 	// If we are simulating, simulate completion of the current move
 	if (simulationMode >= SimulationMode::normal)
 	{
@@ -299,8 +269,13 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 		// Count how many prepared or executing moves we have and how long they will take
 		uint32_t preparedTime = 0;
 		unsigned int preparedCount = 0;
+    uint32_t minTimeLeft = cdda->GetTimeLeft();
 		while (cdda->IsCommitted())
 		{
+      if (cdda->GetTimeLeft() < minTimeLeft)
+      {
+        minTimeLeft = cdda->GetTimeLeft();
+      }
 			preparedTime += cdda->GetTimeLeft();
 			++preparedCount;
 			cdda = cdda->GetNext();
@@ -309,6 +284,14 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 		const uint32_t ret = (cdda->IsProvisional())
 						? PrepareMoves(cdda, prepareAdvanceTime, preparedTime, preparedCount, simulationMode)
 							: MoveTiming::StandardMoveWakeupInterval;
+
+#if RRF_HOST_BUILD
+  	{
+  		HostTiming::ClockTagScope clockScope(HostTiming::ClockStatKind::Simulation);
+  		HostTiming::AdvanceStepClocks(minTimeLeft);
+  	}
+    return 0;
+#endif
 
 		if (simulationMode != SimulationMode::off)
 		{
@@ -330,17 +313,10 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 				return moveTime;
 			}
 		}
-
 		return ret;
 	}
 
 	// No DDA is committed, so commit a new one if possible
-#if RRF_HOST_BUILD
-	if (!cdda->IsCommitted() && cdda->IsProvisional() && completedMoves != 0)
-	{
-		shouldStartMove = true;									// after we've seen motion, keep time flowing even if millis() stalls
-	}
-#endif
 	if (   shouldStartMove											// if the Move code told us that we should start a move in any case...
 		|| waitingForRingToEmpty									// ...or GCodes is waiting for all moves to finish...
 		|| cdda->IsIsolatedMove()									// ...or checking endstops or another isolated move, so we can't schedule the following move
@@ -373,6 +349,14 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 		}
 		return ret;
 	}
+#if RRF_HOST_BUILD
+	if (!cdda->IsCommitted() && cdda->IsProvisional())
+	{
+    HostTiming::AdvanceStepClocks(10);
+    HostTiming::ReportSimulationClocks(10);
+	}
+  return 0;
+#endif
 
 	return (cdda->IsProvisional())
 			? MoveStartPollInterval									// there are moves in the queue but it is not time to prepare them yet
