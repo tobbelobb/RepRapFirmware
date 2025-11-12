@@ -1177,7 +1177,11 @@ void DDA::Prepare(DDARing& ring,
 		}
 		else if (startSpeed == 0.0)
 		{
+#if RRF_HOST_BUILD
+			afterPrepare.moveStartTime = now;  // In simulation, start immediately
+#else
 			afterPrepare.moveStartTime = now + prepareAdvanceTime;
+#endif
 		}
 		else
 		{
@@ -1187,7 +1191,11 @@ void DDA::Prepare(DDARing& ring,
 	}
 	else
 	{
+#if RRF_HOST_BUILD
+		afterPrepare.moveStartTime = now;  // In simulation, start immediately
+#else
 		afterPrepare.moveStartTime = now + prepareAdvanceTime;
+#endif
 	}
 
 	if (simMode < SimulationMode::normal)
