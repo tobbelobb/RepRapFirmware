@@ -237,9 +237,6 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 		{
 			const uint32_t clocksNeeded = cdda->GetClocksNeeded();
 			simulationTime += (float)clocksNeeded * (1.0/StepClockRate);
-#if RRF_HOST_BUILD
-			HostTiming::ReportSimulationClocks(clocksNeeded);
-#endif
 			++completedMoves;
 			if (cdda->Free())
 			{
@@ -256,7 +253,7 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 #if RRF_HOST_BUILD
 			const uint32_t clocksNeeded = cdda->GetClocksNeeded();
 			simulationTime += (float)clocksNeeded * (1.0/StepClockRate);
-			HostTiming::ReportSimulationClocks(clocksNeeded);
+			//HostTiming::ReportSimulationClocks(clocksNeeded);
 #endif
 			++completedMoves;
 			//debugPrintf("Retiring move: now=%" PRIu32 " start=%" PRIu32 " dur=%" PRIu32 "\n", StepTimer::GetMovementTimerTicks(), cdda->GetMoveStartTime(), cdda->GetClocksNeeded());

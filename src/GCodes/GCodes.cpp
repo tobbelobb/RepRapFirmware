@@ -3723,7 +3723,7 @@ GCodeResult GCodes::DoDwell(GCodeBuffer& gb) THROWS(GCodeException)
 	   )
 	{
 		simulationTime += (float)dwell * 0.001;
-		HostTiming::ReportSimulationClocks(dwellStepClocks);
+		HostTiming::AdvanceStepClocks(dwellStepClocks);
 	}
 	#endif
 	if (   IsSimulating()															// if we are simulating then simulate the G4...
@@ -3734,7 +3734,7 @@ GCodeResult GCodes::DoDwell(GCodeBuffer& gb) THROWS(GCodeException)
 	{
 		simulationTime += (float)dwell * 0.001;
 #if RRF_HOST_BUILD
-		HostTiming::ReportSimulationClocks(dwellStepClocks);
+		HostTiming::AdvanceStepClocks(dwellStepClocks);
 #endif
 		return GCodeResult::ok;
 	}
