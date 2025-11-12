@@ -344,6 +344,9 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 		|| cdda->IsIsolatedMove()									// ...or checking endstops or another isolated move, so we can't schedule the following move
 	   )
 	{
+    if (!cdda->IsCommitted() && cdda->IsProvisional() && shouldStartMove) {
+        std::cout << "Queue drained - starting first move after empty period\n";
+    }
 		const uint32_t ret = PrepareMoves(cdda, prepareAdvanceTime, 0, 0, simulationMode);
 		if (cdda->IsCommitted())
 		{
