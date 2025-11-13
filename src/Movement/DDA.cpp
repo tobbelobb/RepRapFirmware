@@ -1154,28 +1154,9 @@ void DDA::Prepare(DDARing& ring,
 	// Decide when this move should start.
 	// Avoid setting the move start time in the past or with very little time before it starts, because this can lead to us trying to modify a segment that is already executing
 	uint32_t now = StepTimer::GetMovementTimerTicks();
-#if RRF_HOST_BUILD
 	if (prev->state == committed)
 	{
 		const uint32_t prevEndTime = prev->afterPrepare.moveStartTime + prev->clocksNeeded;
-		const uint32_t minNow =
-			(prevEndTime > MoveTiming::AbsoluteMinimumPreparedTime)
-				? prevEndTime - MoveTiming::AbsoluteMinimumPreparedTime
-				: 0;
-		if (now > minNow)
-		{
-			now = minNow;
-		}
-	}
-#endif
-	if (prev->state == committed)
-	{
-		const uint32_t prevEndTime = prev->afterPrepare.moveStartTime + prev->clocksNeeded;
-#if RRF_HOST_BUILD
-		// In simulation, always start moves immediately after the previous move ends
-		// No preparation buffer needed since time is virtual
-		afterPrepare.moveStartTime = prevEndTime;
-#else
 		if ((int32_t)(prevEndTime - now) >= (int32_t)MoveTiming::AbsoluteMinimumPreparedTime)
 		{
 			afterPrepare.moveStartTime = prevEndTime;		// start this move directly after the previous one
@@ -1189,15 +1170,10 @@ void DDA::Prepare(DDARing& ring,
 			afterPrepare.moveStartTime = now + MoveTiming::AbsoluteMinimumPreparedTime;
 			reprap.GetMove().AddPrepareHiccup();		// move was supposed to follow the previous one directly, so record a hiccup
 		}
-#endif
 	}
 	else
 	{
-#if RRF_HOST_BUILD
-		afterPrepare.moveStartTime = now;  // In simulation, start immediately (no previous move)
-#else
 		afterPrepare.moveStartTime = now + prepareAdvanceTime;
-#endif
 	}
 
 	if (simMode < SimulationMode::normal)
