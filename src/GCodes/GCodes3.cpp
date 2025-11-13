@@ -20,7 +20,6 @@
 #include <Platform/Tasks.h>
 #include <Hardware/I2C.h>
 #include <Movement/StepperDrivers/SmartDrivers.h>
-
 #if HAS_WIFI_NETWORKING || HAS_AUX_DEVICES || HAS_MASS_STORAGE || HAS_SBC_INTERFACE
 # include <Comms/FirmwareUpdater.h>
 #endif
@@ -70,7 +69,8 @@ GCodeResult GCodes::SetPositions(GCodeBuffer& gb, const StringRef& reply) THROWS
 
 	// Don't wait for the machine to stop if only extruder drives are being reset.
 	// This avoids blobs and seams when the gcode uses absolute E coordinates and periodically includes G92 E0.
-	ParameterLettersBitmap axisLettersMentioned = gb.AllParameters() & allAxisLetters;
+	const ParameterLettersBitmap paramsPresent = gb.AllParameters();
+	ParameterLettersBitmap axisLettersMentioned = paramsPresent & allAxisLetters;
 	if (axisLettersMentioned.IsNonEmpty())
 	{
 		if (!LockCurrentMovementSystemAndWaitForStandstill(gb))	// lock movement and get current coordinates before we try to allocate any axes
@@ -97,6 +97,22 @@ GCodeResult GCodes::SetPositions(GCodeBuffer& gb, const StringRef& reply) THROWS
 	}
 
 	// Handle any E parameter in the G92 command
+	const bool extruderParamPresent = paramsPresent.IsBitSet(ParameterLetterToBitNumber(extrudeLetter));
+	if (axisLettersMentioned.IsEmpty() && extruderParamPresent && ms.extruderOnlyMovePending)
+	{
+		const uint32_t scheduled = reprap.GetMove().GetScheduledMoves();
+		const uint32_t completed = reprap.GetMove().GetCompletedMoves();
+		const FilePosition pendingPos = ms.pendingExtruderFilePos;
+		const FilePosition currentPos = gb.GetJobFilePosition();
+		if (scheduled > completed && scheduled - completed == 1
+			&& pendingPos != noFilePosition && currentPos >= pendingPos && currentPos - pendingPos <= 64)
+		{
+			if (!LockCurrentMovementSystemAndWaitForStandstill(gb))
+			{
+				return GCodeResult::notFinished;
+			}
+		}
+	}
 	if (gb.Seen(extrudeLetter))
 	{
 		ms.latestVirtualExtruderPosition = gb.GetDistance();

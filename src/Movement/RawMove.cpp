@@ -45,6 +45,8 @@ void MovementState::SetDefaults(size_t firstDriveToZero) noexcept
 	{
 		coords[drive] = 0.0;					// clear extrusion
 	}
+	extruderOnlyMovePending = false;
+	pendingExtruderFilePos = noFilePosition;
 }
 
 void MovementState::ClearMove() noexcept
@@ -59,6 +61,8 @@ void MovementState::ClearMove() noexcept
 	moveType = 0;
 	applyM220M221 = false;
 	moveFractionToSkip = 0.0;
+	extruderOnlyMovePending = false;
+	pendingExtruderFilePos = noFilePosition;
 }
 
 int32_t MovementState::lastKnownEndpoints[MaxAxesPlusExtruders];			// the last stored  position of the logical drives
