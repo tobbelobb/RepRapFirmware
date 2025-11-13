@@ -358,6 +358,7 @@ public:
 
 	// Functions called by DDA::Prepare to generate segments for executing DDAs
 	void AddLinearSegments(size_t logicalDrive, uint32_t startTime, const PrepParams& params, motioncalc_t steps, MovementFlags moveFlags) noexcept;
+	void FreeOldSegments(const uint32_t now) noexcept;														// Free segments that have finished executing (simulation only)
 
 	bool AreDrivesStopped(LogicalDrivesBitmap drives) const noexcept;						// return true if none of the drives passed has any movement pending
 

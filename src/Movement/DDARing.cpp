@@ -223,6 +223,19 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 {
 	DDA *cdda = getPointer;											// capture volatile variable
 
+  static uint64_t ddaSpinCount = 0;
+  static uint64_t committedCount = 0;
+  static uint64_t hasExpiredCount = 0;
+  if (cdda->IsCommitted()) committedCount++;
+  if (cdda->HasExpired()) hasExpiredCount++;
+
+  if ((++ddaSpinCount % 100000ULL) == 0) {
+    //std::cout << "[DDARing::Spin] ddaSpinCount: " << ddaSpinCount << " committedCount: " << committedCount << " hasExpiredCount: " << hasExpiredCount << '\n';
+    ddaSpinCount = 0;
+    committedCount = 0;
+    hasExpiredCount = 0;
+  }
+
 	// If we are simulating, simulate completion of the current move
 	if (simulationMode >= SimulationMode::normal)
 	{
@@ -287,6 +300,17 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 
 #if RRF_HOST_BUILD
   	{
+       //static uint32_t debugCounter = 0;
+       //if ((++debugCounter % 1000) == 0)
+       //{
+       //	std::cout << "[DDARing::Spin] preparedCount=" << preparedCount
+       //	          << " minTimeLeft=" << minTimeLeft
+       //	          << " scheduledMoves=" << scheduledMoves
+       //	          << " completedMoves=" << completedMoves
+       //	          << " ddaSpinCount=" << ddaSpinCount
+       //           << '\n';
+       //}
+
   		// In simulation, we want to maintain good lookahead depth
   		// If preparedCount is low, advance time more slowly to give the system
   		// time to add and prepare more moves
@@ -308,9 +332,14 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
   			// Queue is shallow, advance slowly (25% of minTimeLeft, min 100 ticks)
   			timeToAdvance = max<uint32_t>(minTimeLeft / 4, 100);
   		}
-
+      uint32_t const beforeAdvance = StepTimer::GetMovementTimerTicks() > 75000000 ? StepTimer::GetMovementTimerTicks() - 75000000 : 0;
   		HostTiming::ClockTagScope clockScope(HostTiming::ClockStatKind::Simulation);
   		HostTiming::AdvanceStepClocks(timeToAdvance);
+
+  		// CRITICAL: In simulation, the ISR can't keep up with virtual time advancement
+  		// Segments accumulate in memory faster than they're freed, causing O(n²) slowdown
+  		// Solution: Manually free old segments that are in the past
+  		reprap.GetMove().FreeOldSegments(beforeAdvance);
   	}
     return 0;
 #endif
