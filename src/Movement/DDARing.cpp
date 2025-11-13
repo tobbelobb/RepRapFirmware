@@ -372,44 +372,6 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 		|| cdda->IsIsolatedMove()									// ...or checking endstops or another isolated move, so we can't schedule the following move
 	   )
 	{
-#if RRF_HOST_BUILD
-		static uint32_t hostStartDelayDeadline = 0;
-		if (shouldStartMove && !waitingForRingToEmpty && !cdda->IsIsolatedMove())
-		{
-			constexpr size_t HostMinProvisionalBeforeStart = 32;
-			constexpr uint32_t HostStartDeferTimeoutMs = 50;
-
-			size_t provisionalMoves = 0;
-			const DDA* probe = cdda;
-			while (probe->IsProvisional() && provisionalMoves < HostMinProvisionalBeforeStart)
-			{
-				++provisionalMoves;
-				probe = probe->GetNext();
-			}
-
-			if (provisionalMoves < HostMinProvisionalBeforeStart)
-			{
-				const uint32_t nowMs = millis();
-				if (hostStartDelayDeadline == 0)
-				{
-					hostStartDelayDeadline = nowMs + HostStartDeferTimeoutMs;
-				}
-				if ((int32_t)(nowMs - hostStartDelayDeadline) < 0)
-				{
-					return MoveStartPollInterval;
-				}
-			}
-			else
-			{
-				hostStartDelayDeadline = 0;
-			}
-		}
-		else
-		{
-			hostStartDelayDeadline = 0;
-		}
-#endif
-
     if (!cdda->IsCommitted() && cdda->IsProvisional() && shouldStartMove) {
         std::cout << "Queue drained - starting first move after empty period\n";
     }
