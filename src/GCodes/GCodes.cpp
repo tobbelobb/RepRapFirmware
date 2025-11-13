@@ -2476,8 +2476,6 @@ bool GCodes::DoStraightMove(GCodeBuffer& gb, bool isCoordinated) THROWS(GCodeExc
 	else if (axesMentioned.IsEmpty())
 	{
 		ms.totalSegments = 1;												// it's an extruder only move
-		ms.extruderOnlyMovePending = hasExtrusion;
-		ms.pendingExtruderFilePos = hasExtrusion ? ms.filePos : noFilePosition;
 	}
 	else
 	{
