@@ -2157,6 +2157,55 @@ void Move::AddLinearSegments(size_t logicalDrive, uint32_t startTime, const Prep
 	}		// End of boosted base priority section
 }
 
+// Free old segments that have finished executing (simulation only)
+// In simulation, virtual time advances much faster than real time, so the ISR can't keep up
+// We must manually free segments that are in the past to prevent memory leak and O(n²) slowdown
+// Parameter 'beforeTime': Only free segments that ended BEFORE this time (typically the oldest active move's start time)
+void Move::FreeOldSegments(const uint32_t beforeTime) noexcept
+{
+#if RRF_HOST_BUILD
+	// Iterate through all drives and free segments that have finished
+	for (size_t drive = 0; drive < MaxAxesPlusExtruders; ++drive)
+	{
+		DriveMovement& dm = dms[drive];
+		MoveSegment *seg = dm.segments;
+		MoveSegment *prev = nullptr;
+
+		// Walk the segment list and free completed segments
+		// Since segments are ordered by time, we can stop at the first non-expired segment
+		while (seg != nullptr)
+		{
+			const uint32_t segEndTime = seg->GetStartTime() + seg->GetDuration();
+
+			// If this segment finished before our cutoff time
+			if ((int32_t)(beforeTime - segEndTime) >= 0)
+			{
+				MoveSegment *toFree = seg;
+				seg = seg->GetNext();
+
+				// Unlink from list
+				if (prev == nullptr)
+				{
+					dm.segments = seg;
+				}
+				else
+				{
+					prev->SetNext(seg);
+				}
+
+				// Free the segment
+				MoveSegment::Release(toFree);
+			}
+			else
+			{
+				// This segment hasn't finished yet; since list is time-ordered, all remaining segments are also not finished
+				break;
+			}
+		}
+	}
+#endif
+}
+
 // Return true if none of the drives passed has any movement pending
 bool Move::AreDrivesStopped(LogicalDrivesBitmap drives) const noexcept
 {

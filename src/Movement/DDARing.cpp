@@ -332,14 +332,13 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
   			// Queue is shallow, advance slowly (25% of minTimeLeft, min 100 ticks)
   			timeToAdvance = max<uint32_t>(minTimeLeft / 4, 100);
   		}
-      uint32_t const beforeAdvance = StepTimer::GetMovementTimerTicks() > 75000000 ? StepTimer::GetMovementTimerTicks() - 75000000 : 0;
   		HostTiming::ClockTagScope clockScope(HostTiming::ClockStatKind::Simulation);
   		HostTiming::AdvanceStepClocks(timeToAdvance);
 
   		// CRITICAL: In simulation, the ISR can't keep up with virtual time advancement
   		// Segments accumulate in memory faster than they're freed, causing O(n²) slowdown
-  		// Solution: Manually free old segments that are in the past
-  		reprap.GetMove().FreeOldSegments(beforeAdvance);
+  		// Solution: Manually free old segments that ended before the current time
+  		reprap.GetMove().FreeOldSegments(StepTimer::GetMovementTimerTicks());
   	}
     return 0;
 #endif
