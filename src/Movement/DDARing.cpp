@@ -314,33 +314,33 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
   		// In simulation, we want to maintain good lookahead depth
   		// If preparedCount is low, advance time more slowly to give the system
   		// time to add and prepare more moves
-  		constexpr unsigned int DesiredPreparedDepth = 5;
-  		uint32_t timeToAdvance;
+  		//constexpr unsigned int DesiredPreparedDepth = 15;
+  		//uint32_t timeToAdvance;
 
-  		if (preparedCount >= DesiredPreparedDepth)
-  		{
-  			// Good queue depth, advance normally
-  			timeToAdvance = minTimeLeft;
-  		}
-  		else if (preparedCount == 0)
-  		{
-  			// Queue is empty, must make some progress
-  			timeToAdvance = 100;  // Minimal advance
-  		}
-  		else
-  		{
-  			// Queue is shallow, advance slowly (25% of minTimeLeft, min 100 ticks)
-  			timeToAdvance = max<uint32_t>(minTimeLeft / 4, 100);
-  		}
+  		//if (preparedCount >= DesiredPreparedDepth)
+  		//{
+  		//	// Good queue depth, advance normally
+  		//	timeToAdvance = minTimeLeft;
+  		//}
+  		////else if (preparedCount == 0)
+  		////{
+  		////	// Queue is empty, must make some progress
+  		////	timeToAdvance = 100;  // Minimal advance
+  		////}
+  		//else
+  		//{
+  		//	// Queue is shallow, advance slowly (25% of minTimeLeft, min 100 ticks)
+  		//	timeToAdvance = 1;  // Minimal advance
+  		//	//timeToAdvance = max<uint32_t>(minTimeLeft / 4, 100);
+  		//}
   		HostTiming::ClockTagScope clockScope(HostTiming::ClockStatKind::Simulation);
-  		HostTiming::AdvanceStepClocks(timeToAdvance);
+  		HostTiming::AdvanceStepClocks(100);
 
   		// CRITICAL: In simulation, the ISR can't keep up with virtual time advancement
   		// Segments accumulate in memory faster than they're freed, causing O(n²) slowdown
   		// Solution: Manually free old segments that ended before the current time
   		reprap.GetMove().FreeOldSegments(StepTimer::GetMovementTimerTicks());
   	}
-    return 0;
 #endif
 
 		if (simulationMode != SimulationMode::off)
