@@ -4,7 +4,7 @@
  *  Created on: 7 Dec 2014
  *      Author: David
  */
-
+#include <iostream>
 #include "DDA.h"
 #include "MoveDebugFlags.h"
 #include <Platform/RepRap.h>
@@ -852,6 +852,7 @@ bool DDA::IsAccelerationMove() const noexcept
 			if (laDDA->prev->state == committed)
 			{
 				laDDA->flags.hadLookaheadUnderrun = true;
+        std::cerr << "====================================================================hadLookaheadUnderrun\n";
 			}
 		}
 
@@ -878,6 +879,7 @@ bool DDA::IsAccelerationMove() const noexcept
 			if (laDDA->beforePrepare.targetNextSpeed < laDDA->endSpeed * 0.99)
 			{
 				ring.RecordLookaheadError();
+        std::cerr << "====================================================================RecordLookaheadError\n";
 				if (reprap.GetDebugFlags(Module::Move).IsBitSet(MoveDebugFlags::Lookahead))
 				{
 					debugPrintf("DDA.cpp(%d) tn=%f ", __LINE__, (double)laDDA->beforePrepare.targetNextSpeed);
@@ -1031,6 +1033,8 @@ MovementError DDA::RecalculateMove(DDARing& ring) noexcept
 				{
 					// The acceleration increase is greater than we expect from rounding error, so record an error
 					ring.RecordLookaheadError();
+
+          std::cerr << "====================================================================LookaheadError 2\n";
 					if (reprap.GetDebugFlags(Module::Move).IsBitSet(MoveDebugFlags::Lookahead))
 					{
 						debugPrintf("DDA.cpp(%d) na=%f", __LINE__, (double)newAcceleration);
@@ -1049,6 +1053,7 @@ MovementError DDA::RecalculateMove(DDARing& ring) noexcept
 				{
 					// The deceleration increase is greater than we expect from rounding error, so record an error
 					ring.RecordLookaheadError();
+          std::cerr << "====================================================================LookaheadError 3\n";
 					if (reprap.GetDebugFlags(Module::Move).IsBitSet(MoveDebugFlags::Lookahead))
 					{
 						debugPrintf("DDA.cpp(%d) nd=%f", __LINE__, (double)newDeceleration);

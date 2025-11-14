@@ -275,13 +275,14 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 	}
 
 	// If we are already moving, see whether we need to prepare any more moves
+	unsigned int preparedCount = 0;
+	static unsigned int prevpreparedCount = 0;
 	if (cdda->IsCommitted())										// if we have started executing moves
 	{
 		const DDA* const currentMove = cdda;						// save for later
 
 		// Count how many prepared or executing moves we have and how long they will take
 		uint32_t preparedTime = 0;
-		unsigned int preparedCount = 0;
     uint32_t minTimeLeft = cdda->GetTimeLeft();
 		while (cdda->IsCommitted())
 		{
@@ -314,27 +315,25 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
   		// In simulation, we want to maintain good lookahead depth
   		// If preparedCount is low, advance time more slowly to give the system
   		// time to add and prepare more moves
-  		//constexpr unsigned int DesiredPreparedDepth = 15;
+  		//constexpr unsigned int plenty = 15;
+  		//constexpr unsigned int shallow = 4;
   		//uint32_t timeToAdvance;
 
-  		//if (preparedCount >= DesiredPreparedDepth)
+  		//if (preparedCount > plenty)
   		//{
   		//	// Good queue depth, advance normally
   		//	timeToAdvance = minTimeLeft;
   		//}
-  		////else if (preparedCount == 0)
-  		////{
-  		////	// Queue is empty, must make some progress
-  		////	timeToAdvance = 100;  // Minimal advance
-  		////}
+  		//else if (preparedCount > shallow)
+  		//{
+  		//	timeToAdvance = max<uint32_t>(minTimeLeft / 4, 100);
+  		//}
   		//else
   		//{
-  		//	// Queue is shallow, advance slowly (25% of minTimeLeft, min 100 ticks)
-  		//	timeToAdvance = 1;  // Minimal advance
-  		//	//timeToAdvance = max<uint32_t>(minTimeLeft / 4, 100);
+  		//	timeToAdvance = 100;  // Minimal advance
   		//}
-  		HostTiming::ClockTagScope clockScope(HostTiming::ClockStatKind::Simulation);
-  		HostTiming::AdvanceStepClocks(100);
+  		//HostTiming::ClockTagScope clockScope(HostTiming::ClockStatKind::Simulation);
+  		HostTiming::AdvanceStepClocks(1000);
 
   		// CRITICAL: In simulation, the ISR can't keep up with virtual time advancement
   		// Segments accumulate in memory faster than they're freed, causing O(n²) slowdown
@@ -345,6 +344,7 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 
 		if (simulationMode != SimulationMode::off)
 		{
+      prevpreparedCount = preparedCount;
 			return 0;
 		}
 
@@ -354,15 +354,18 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 			const int32_t moveTicksLeft = currentMove->GetMoveFinishTime() - StepTimer::GetMovementTimerTicks();
 			if (moveTicksLeft < 0)
 			{
+      prevpreparedCount = preparedCount;
 				return 0;
 			}
 
 			const uint32_t moveTime = (uint32_t)moveTicksLeft/(StepClockRate/1000) + 1;	// 1ms ticks until the move finishes plus 1ms
 			if (moveTime < ret)
 			{
+      prevpreparedCount = preparedCount;
 				return moveTime;
 			}
 		}
+      prevpreparedCount = preparedCount;
 		return ret;
 	}
 
@@ -373,13 +376,18 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 	   )
 	{
     if (!cdda->IsCommitted() && cdda->IsProvisional() && shouldStartMove) {
-        std::cout << "Queue drained - starting first move after empty period\n";
+        static int drains = 0;
+        drains++;
+        if (drains > 1) {
+        	std::cerr << "Queue drained - starting first move after empty period. preparedCount=" << preparedCount << " prevpreparedCount=" << prevpreparedCount << "\n";
+        }
     }
 		const uint32_t ret = PrepareMoves(cdda, prepareAdvanceTime, 0, 0, simulationMode);
 		if (cdda->IsCommitted())
 		{
 			if (simulationMode != SimulationMode::off)
 			{
+      prevpreparedCount = preparedCount;
 				return 0;											// we don't want any delay because we want Spin() to be called again soon to complete this move
 			}
 
@@ -390,16 +398,19 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 				const int32_t moveTicksLeft = cdda->GetMoveFinishTime() - StepTimer::GetMovementTimerTicks();
 				if (moveTicksLeft < 0)
 				{
+      prevpreparedCount = preparedCount;
 					return 0;
 				}
 
 				const uint32_t moveTime = (uint32_t)moveTicksLeft/(StepClockRate/1000) + 1;	// 1ms ticks until the move finishes plus 1ms
 				if (moveTime < ret)
 				{
+      prevpreparedCount = preparedCount;
 					return moveTime;
 				}
 			}
 		}
+      prevpreparedCount = preparedCount;
 		return ret;
 	}
 #if RRF_HOST_BUILD
@@ -408,9 +419,11 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
     HostTiming::AdvanceStepClocks(10);
     HostTiming::ReportSimulationClocks(10);
 	}
+      prevpreparedCount = preparedCount;
   return 0;
 #endif
 
+      prevpreparedCount = preparedCount;
 	return (cdda->IsProvisional())
 			? MoveStartPollInterval									// there are moves in the queue but it is not time to prepare them yet
 				: MoveTiming::StandardMoveWakeupInterval;			// the queue is empty, nothing to do until new moves arrive
