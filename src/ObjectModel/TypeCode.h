@@ -10,10 +10,6 @@
 
 #include <cstdint>
 
-#ifdef RRF_HOST_BUILD
-# include <Config/Features_Host.h>
-#endif
-
 #define SUPPORT_BITMAP64	(SAME70 || SAME5x)		// we don't have any 64-bit bitmaps in the OM on Duet 2
 
 // Type codes to indicate what type of expression we have and how it is represented.

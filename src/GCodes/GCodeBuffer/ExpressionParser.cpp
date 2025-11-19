@@ -10,10 +10,8 @@
 #include "GCodeBuffer.h"
 #include <Platform/RepRap.h>
 #include <Platform/Platform.h>
-#if HAS_MASS_STORAGE
-# include <Storage/MassStorage.h>
-# include <Storage/FileStore.h>
-#endif
+#include <Storage/MassStorage.h>
+#include <Storage/FileStore.h>
 #include <General/NamedEnum.h>
 #include <General/NumericConverter.h>
 #include <Hardware/ExceptionHandlers.h>

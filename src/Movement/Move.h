@@ -19,11 +19,7 @@
 #include "Kinematics/Kinematics.h"
 #include "MoveSegment.h"
 #include "DriveMovement.h"
-#if RRF_HOST_BUILD
-# include <Movement/StepTimer.h>
-#else
-# include "StepTimer.h"
-#endif
+#include "StepTimer.h"
 #include <GCodes/RestorePoint.h>
 #include <Math/Deviation.h>
 #include <Hardware/IoPorts.h>
@@ -364,7 +360,9 @@ public:
 
 	// Functions called by DDA::Prepare to generate segments for executing DDAs
 	void AddLinearSegments(size_t logicalDrive, uint32_t startTime, const PrepParams& params, motioncalc_t steps, MovementFlags moveFlags) noexcept;
-	void FreeOldSegments(const uint32_t now) noexcept;														// Free segments that have finished executing (simulation only)
+#if RRF_HOST_BUILD
+	void FreeOldSegments(const uint32_t now) noexcept;
+#endif
 
 	bool AreDrivesStopped(LogicalDrivesBitmap drives) const noexcept;						// return true if none of the drives passed has any movement pending
 
@@ -375,9 +373,6 @@ public:
 	bool SetKinematics(const char *_ecv_array _ecv_null name, int legacyType) noexcept;		// Set kinematics, return true if successful
 	MovementError CartesianToMotorSteps(const float machinePos[MaxAxes], int32_t motorPos[MaxAxes], bool isCoordinated) const noexcept;
 																							// Convert Cartesian coordinates to motor coordinates, return true if successful
-#ifdef RRF_HOST_BUILD
-	void ConfigureSegmentation(float segmentsPerSecond, float minSegmentLength) noexcept;
-#endif
 	void MotorStepsToCartesian(const int32_t motorPos[], size_t numVisibleAxes, size_t numTotalAxes, float machinePos[]) const noexcept;
 																							// Convert motor coordinates to machine coordinates
 	const char *_ecv_array GetGeometryString() const noexcept { return kinematics->GetName(); }

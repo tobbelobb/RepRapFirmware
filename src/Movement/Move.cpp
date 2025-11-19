@@ -61,6 +61,7 @@
 
 #include <limits>
 
+
 constexpr float MinStepPulseTiming = 0.2;												// we assume that we always generate step high and low times at least this wide without special action
 
 Task<Move::MoveTaskStackWords> Move::moveTask;
@@ -857,7 +858,7 @@ bool Move::WaitingForAllMovesFinished(MovementSystemNumber msNumber
 		return false;
 	}
 
-#ifdef RRF_HOST_BUILD
+#if RRF_HOST_BUILD
 	// In host simulation, moves are "finished" when the ring is empty
 	// No need to check for physical drive motion since we're not on real hardware
 	(void)msNumber;  // Suppress unused parameter warning
@@ -1668,13 +1669,9 @@ MoveSegment *Move::AddSegment(MoveSegment *list, uint32_t startTime, uint32_t du
 {
 	if ((int32_t)duration <= 0)
 	{
-#if !RRF_HOST_BUILD
 		const StringRef& dbgRef = Platform::genericDebugBuffer.GetRef();
 		dbgRef.printf("Adding zero or negative duration segment: d=%3e a=%.3e\n", (double)distance, (double)a);
 		Platform::hasGenericDebug = true;
-#else
-		Platform::hasGenericDebug = true;
-#endif
 	}
 
 	// Adjust the distance (and implicitly the initial speed) to account for pressure advance
@@ -1912,13 +1909,11 @@ void Move::AddLinearSegments(size_t logicalDrive, uint32_t startTime, const Prep
 				if (tail->GetFlags().executing)
 				{
 					// Error, the segment we are trying to add overlaps an executing one
-#if !RRF_HOST_BUILD
 					const StringRef& dbgRef = Platform::genericDebugBuffer.GetRef();
 					dbgRef.printf("Code 3 move error: new: start=%" PRIu32 " overlap=%" PRIu32 " time now=%" PRIu32 ", existing: ",
 									startTime, segStartTime + tail->GetDuration() - startTime, StepTimer::GetMovementTimerTicks());
 					tail->AppendDetails(dbgRef);
 					dbgRef.cat('\n');
-#endif
 					Platform::shouldTurnOffHeaters = true;
 					Platform::hasGenericDebug = true;
 					StepErrorHalt();
@@ -2157,13 +2152,13 @@ void Move::AddLinearSegments(size_t logicalDrive, uint32_t startTime, const Prep
 	}		// End of boosted base priority section
 }
 
-// Free old segments that have finished executing (simulation only)
-// In simulation, virtual time advances much faster than real time, so the ISR can't keep up
+
+#if RRF_HOST_BUILD
+// On host (CAN capture), virtual time advances much faster than real time, so the ISR can't keep up
 // We must manually free segments that are in the past to prevent memory leak and O(n²) slowdown
-// Parameter 'beforeTime': Only free segments that ended BEFORE this time (typically the oldest active move's start time)
+// Parameter 'beforeTime': Only free segments that ended before this time
 void Move::FreeOldSegments(const uint32_t beforeTime) noexcept
 {
-#if RRF_HOST_BUILD
 	// Iterate through all drives and free segments that have finished
 	for (size_t drive = 0; drive < MaxAxesPlusExtruders; ++drive)
 	{
@@ -2203,8 +2198,8 @@ void Move::FreeOldSegments(const uint32_t beforeTime) noexcept
 			}
 		}
 	}
-#endif
 }
+#endif
 
 // Return true if none of the drives passed has any movement pending
 bool Move::AreDrivesStopped(LogicalDrivesBitmap drives) const noexcept

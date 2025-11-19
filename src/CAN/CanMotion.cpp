@@ -13,9 +13,7 @@
 #include <CanMessageFormats.h>
 #include "CanInterface.h"
 #include <Platform/Platform.h>
-#if RRF_HOST_BUILD
-# include <Platform/RepRap.h>
-#endif
+#include <Platform/RepRap.h>
 #include <GCodes/GCodes.h>
 #include <Movement/Move.h>
 #include <General/FreelistManager.h>

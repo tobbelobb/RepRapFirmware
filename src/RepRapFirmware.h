@@ -53,10 +53,6 @@ const char *_ecv_array _ecv_null SafeStrptime(const char *_ecv_array buf, const 
 #include <CoreIO.h>
 #include <General/NamedEnum.h>
 
-#ifdef RRF_HOST_BUILD
-# include <Config/Features_Host.h>
-#endif
-
 // The following are needed by many other files, so include them here
 #include <Platform/MessageType.h>
 #include <GCodeResult.h>

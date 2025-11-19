@@ -20,8 +20,6 @@
 
 #if RRF_HOST_BUILD
 # include <HostTiming.h>
-# include <iostream>
-# include <thread>
 #endif
 
 #if SUPPORT_CAN_EXPANSION
@@ -223,34 +221,19 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 {
 	DDA *cdda = getPointer;											// capture volatile variable
 
-  static uint64_t ddaSpinCount = 0;
-  static uint64_t committedCount = 0;
-  static uint64_t hasExpiredCount = 0;
-  if (cdda->IsCommitted()) committedCount++;
-  if (cdda->HasExpired()) hasExpiredCount++;
-
-  if ((++ddaSpinCount % 100000ULL) == 0) {
-    //std::cout << "[DDARing::Spin] ddaSpinCount: " << ddaSpinCount << " committedCount: " << committedCount << " hasExpiredCount: " << hasExpiredCount << '\n';
-    ddaSpinCount = 0;
-    committedCount = 0;
-    hasExpiredCount = 0;
-  }
-
 	// If we are simulating, simulate completion of the current move
 	if (simulationMode >= SimulationMode::normal)
 	{
 		// Simulate completion of one move
 		if (cdda->IsCommitted())
 		{
-			const uint32_t clocksNeeded = cdda->GetClocksNeeded();
-			simulationTime += (float)clocksNeeded * (1.0/StepClockRate);
+			simulationTime += (float)cdda->GetClocksNeeded() * (1.0/StepClockRate);
 			++completedMoves;
 			if (cdda->Free())
 			{
 				++numLookaheadUnderruns;
 			}
 			getPointer = cdda = cdda->GetNext();
-      //std::cout << "Moving pointer 1" << '\n';
 		}
 	}
 	else
@@ -270,26 +253,19 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 				++numLookaheadUnderruns;
 			}
 			getPointer = cdda = cdda->GetNext();
-      //std::cout << "Moving pointer 2" << '\n';
 		}
 	}
 
 	// If we are already moving, see whether we need to prepare any more moves
-	unsigned int preparedCount = 0;
-	static unsigned int prevpreparedCount = 0;
 	if (cdda->IsCommitted())										// if we have started executing moves
 	{
 		const DDA* const currentMove = cdda;						// save for later
 
 		// Count how many prepared or executing moves we have and how long they will take
 		uint32_t preparedTime = 0;
-    uint32_t minTimeLeft = cdda->GetTimeLeft();
+		unsigned int preparedCount = 0;
 		while (cdda->IsCommitted())
 		{
-      if (cdda->GetTimeLeft() < minTimeLeft)
-      {
-        minTimeLeft = cdda->GetTimeLeft();
-      }
 			preparedTime += cdda->GetTimeLeft();
 			++preparedCount;
 			cdda = cdda->GetNext();
@@ -300,51 +276,18 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 							: MoveTiming::StandardMoveWakeupInterval;
 
 #if RRF_HOST_BUILD
-  	{
-       //static uint32_t debugCounter = 0;
-       //if ((++debugCounter % 1000) == 0)
-       //{
-       //	std::cout << "[DDARing::Spin] preparedCount=" << preparedCount
-       //	          << " minTimeLeft=" << minTimeLeft
-       //	          << " scheduledMoves=" << scheduledMoves
-       //	          << " completedMoves=" << completedMoves
-       //	          << " ddaSpinCount=" << ddaSpinCount
-       //           << '\n';
-       //}
-
-  		// In simulation, we want to maintain good lookahead depth
-  		// If preparedCount is low, advance time more slowly to give the system
-  		// time to add and prepare more moves
-  		//constexpr unsigned int plenty = 15;
-  		//constexpr unsigned int shallow = 4;
-  		//uint32_t timeToAdvance;
-
-  		//if (preparedCount > plenty)
-  		//{
-  		//	// Good queue depth, advance normally
-  		//	timeToAdvance = minTimeLeft;
-  		//}
-  		//else if (preparedCount > shallow)
-  		//{
-  		//	timeToAdvance = max<uint32_t>(minTimeLeft / 4, 100);
-  		//}
-  		//else
-  		//{
-  		//	timeToAdvance = 100;  // Minimal advance
-  		//}
-  		//HostTiming::ClockTagScope clockScope(HostTiming::ClockStatKind::Simulation);
-  		HostTiming::AdvanceStepClocks(1000);
-
-  		// CRITICAL: In simulation, the ISR can't keep up with virtual time advancement
-  		// Segments accumulate in memory faster than they're freed, causing O(n²) slowdown
-  		// Solution: Manually free old segments that ended before the current time
-  		reprap.GetMove().FreeOldSegments(StepTimer::GetMovementTimerTicks());
-  	}
+		{
+			HostTiming::ClockTagScope clockScope(HostTiming::ClockStatKind::Simulation);
+			HostTiming::AdvanceStepClocks(1000);
+			// On host, the ISR can't keep up with virtual time advancement
+			// Segments accumulate in memory faster than they're freed, causing O(n²) slowdown
+			// We therefore free old segments that ended before the current time
+			reprap.GetMove().FreeOldSegments(StepTimer::GetMovementTimerTicks());
+		}
 #endif
 
 		if (simulationMode != SimulationMode::off)
 		{
-      prevpreparedCount = preparedCount;
 			return 0;
 		}
 
@@ -354,18 +297,15 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 			const int32_t moveTicksLeft = currentMove->GetMoveFinishTime() - StepTimer::GetMovementTimerTicks();
 			if (moveTicksLeft < 0)
 			{
-      prevpreparedCount = preparedCount;
 				return 0;
 			}
 
 			const uint32_t moveTime = (uint32_t)moveTicksLeft/(StepClockRate/1000) + 1;	// 1ms ticks until the move finishes plus 1ms
 			if (moveTime < ret)
 			{
-      prevpreparedCount = preparedCount;
 				return moveTime;
 			}
 		}
-      prevpreparedCount = preparedCount;
 		return ret;
 	}
 
@@ -375,19 +315,18 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 		|| cdda->IsIsolatedMove()									// ...or checking endstops or another isolated move, so we can't schedule the following move
 	   )
 	{
-    if (!cdda->IsCommitted() && cdda->IsProvisional() && shouldStartMove) {
-        static int drains = 0;
-        drains++;
-        if (drains > 1) {
-        	std::cerr << "Queue drained - starting first move after empty period. preparedCount=" << preparedCount << " prevpreparedCount=" << prevpreparedCount << "\n";
-        }
-    }
+		if (!cdda->IsCommitted() && cdda->IsProvisional() && shouldStartMove) {
+			static int drains = 0;
+			drains++;
+			if (drains > 1) {
+				debugPrintf("Queue drained - starting first move after empty period.\n");
+			}
+		}
 		const uint32_t ret = PrepareMoves(cdda, prepareAdvanceTime, 0, 0, simulationMode);
 		if (cdda->IsCommitted())
 		{
 			if (simulationMode != SimulationMode::off)
 			{
-      prevpreparedCount = preparedCount;
 				return 0;											// we don't want any delay because we want Spin() to be called again soon to complete this move
 			}
 
@@ -398,32 +337,26 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 				const int32_t moveTicksLeft = cdda->GetMoveFinishTime() - StepTimer::GetMovementTimerTicks();
 				if (moveTicksLeft < 0)
 				{
-      prevpreparedCount = preparedCount;
 					return 0;
 				}
 
 				const uint32_t moveTime = (uint32_t)moveTicksLeft/(StepClockRate/1000) + 1;	// 1ms ticks until the move finishes plus 1ms
 				if (moveTime < ret)
 				{
-      prevpreparedCount = preparedCount;
 					return moveTime;
 				}
 			}
 		}
-      prevpreparedCount = preparedCount;
 		return ret;
 	}
 #if RRF_HOST_BUILD
 	if (!cdda->IsCommitted() && cdda->IsProvisional())
 	{
-    HostTiming::AdvanceStepClocks(10);
-    HostTiming::ReportSimulationClocks(10);
+		HostTiming::AdvanceStepClocks(10);
+		HostTiming::ReportSimulationClocks(10);
 	}
-      prevpreparedCount = preparedCount;
-  return 0;
 #endif
 
-      prevpreparedCount = preparedCount;
 	return (cdda->IsProvisional())
 			? MoveStartPollInterval									// there are moves in the queue but it is not time to prepare them yet
 				: MoveTiming::StandardMoveWakeupInterval;			// the queue is empty, nothing to do until new moves arrive

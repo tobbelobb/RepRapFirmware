@@ -108,27 +108,6 @@ bool Kinematics::TryConfigureSegmentation(GCodeBuffer& gb) THROWS(GCodeException
 	return seen;
 }
 
-#ifdef RRF_HOST_BUILD
-void Kinematics::ConfigureSegmentationParameters(float segmentsPerSecondIn, float minSegmentLengthIn) noexcept
-{
-	if (!segmentationType.useSegmentation)
-	{
-		return;
-	}
-
-	if (segmentsPerSecondIn > 0.0f && minSegmentLengthIn > 0.0f)
-	{
-		segmentsPerSecond = segmentsPerSecondIn;
-		minSegmentLength = minSegmentLengthIn;
-		reciprocalMinSegmentLength = 1.0f / minSegmentLengthIn;
-	}
-	else
-	{
-		segmentationType.useSegmentation = false;
-	}
-}
-#endif
-
 // Return true if the specified XY position is reachable by the print head reference point.
 // This default implementation assumes a rectangular reachable area, so it just uses the bed dimensions give in the M208 command.
 bool Kinematics::IsReachable(float axesCoords[MaxAxes], AxesBitmap axes) const noexcept

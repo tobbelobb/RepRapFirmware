@@ -574,7 +574,7 @@ void MovementState::AdjustMotorPositions(const float adjustment[], size_t numMot
 
 /*static*/ void MovementState::DebugPrintLastKnownEndpoints(const char *_ecv_array str) noexcept
 {
-  debugPrintf("%s", (str ? str : ""));
+	debugPrintf("%s", (str ? str : ""));
 	for (int32_t ep : lastKnownEndpoints)
 	{
 		debugPrintf(" %" PRIi32, ep);

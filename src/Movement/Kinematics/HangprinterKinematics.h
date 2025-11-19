@@ -62,11 +62,7 @@ protected:
 	bool IsInsidePyramidSides(float const coords[3]) const noexcept;
 	bool IsInsidePrismSides(float const coords[3], unsigned const discount_last) const noexcept;
 
-#if RRF_HOST_BUILD
-public:  // Make constructor public for host build
-#else
 private:
-#endif
 	static KinematicsTypeDescriptor hangprinterKinematicsDescriptor;
 
 	// Basic facts about movement system

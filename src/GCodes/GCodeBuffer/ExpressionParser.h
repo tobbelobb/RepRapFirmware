@@ -11,9 +11,7 @@
 #include <RepRapFirmware.h>
 #include <ObjectModel/ObjectModel.h>
 #include <GCodes/GCodeException.h>
-#if RRF_HOST_BUILD
-# include <Storage/FileStore.h>
-#endif
+#include <Storage/FileStore.h>
 
 class VariableSet;
 

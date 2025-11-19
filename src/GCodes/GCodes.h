@@ -558,9 +558,6 @@ private:
 	void AppendAxes(const StringRef& reply, AxesBitmap axes) const noexcept;	// Append a list of axes to a string
 
 	void EndSimulation(GCodeBuffer *_ecv_null gb) noexcept;							// Restore positions etc. when exiting simulation mode
-#if RRF_HOST_BUILD
-	void HostForceSimulationMode(SimulationMode newMode) noexcept;
-#endif
 
 #if HAS_MASS_STORAGE || HAS_SBC_INTERFACE
 	void SaveResumeInfo(bool wasPowerFailure) noexcept;

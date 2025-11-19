@@ -858,32 +858,6 @@ void GCodes::EndSimulation(GCodeBuffer *null gb) noexcept
 	reprap.MoveUpdated();
 }
 
-#if RRF_HOST_BUILD
-void GCodes::HostForceSimulationMode(SimulationMode newMode) noexcept
-{
-	if (simulationMode == newMode)
-	{
-		return;
-	}
-
-	if (newMode == SimulationMode::off)
-	{
-		simulationMode = SimulationMode::off;
-		simulationTime = 0.0f;
-		reprap.GetMove().Simulate(SimulationMode::off);
-		return;
-	}
-
-	simulationMode = newMode;
-	simulationTime = 0.0f;
-	exitSimulationWhenFileComplete = false;
-	updateFileWhenSimulationComplete = false;
-	axesVirtuallyHomed = AxesBitmap::MakeLowestNBits(numVisibleAxes);
-	MovementState::SaveEndpointsBeforeSimulating();
-	reprap.GetMove().Simulate(newMode);
-}
-#endif
-
 // Check for and execute triggers
 void GCodes::CheckTriggers() noexcept
 {
@@ -3710,23 +3684,20 @@ GCodeResult GCodes::DoDwell(GCodeBuffer& gb) THROWS(GCodeException)
 	}
 
 #if RRF_HOST_BUILD
-	const uint32_t dwellMillis = static_cast<uint32_t>(dwell);
-	const uint64_t dwellStepClocks = static_cast<uint64_t>(MillisToStepClocks(dwellMillis));
-#endif
-
-	#if RRF_HOST_BUILD
 	// On host we want to keep track of simulation time even when we're not running in simulation mode
-	if (  !IsSimulating()
-		&& &gb != DaemonGCode()
+	if ( &gb != DaemonGCode()
 		&& &gb != TriggerGCode()
 		&& (gb.IsFileChannel() || !exitSimulationWhenFileComplete)
 	   )
 	{
-		simulationTime += (float)dwell * 0.001;
+		const uint32_t dwellMillis = static_cast<uint32_t>(dwell);
+		const uint64_t dwellStepClocks = static_cast<uint64_t>(MillisToStepClocks(dwellMillis));
 		HostTiming::AdvanceStepClocks(dwellStepClocks);
-    HostTiming::ReportSimulationClocks(dwellStepClocks);
+		HostTiming::ReportSimulationClocks(dwellStepClocks);
+		simulationTime += (float)dwell * 0.001;
+		return GCodeResult::ok;
 	}
-	#endif
+#else
 	if (   IsSimulating()															// if we are simulating then simulate the G4...
 		&& &gb != DaemonGCode()														// ...unless it comes from the daemon...
 		&& &gb != TriggerGCode()													// ...or a trigger...
@@ -3734,12 +3705,9 @@ GCodeResult GCodes::DoDwell(GCodeBuffer& gb) THROWS(GCodeException)
 	   )
 	{
 		simulationTime += (float)dwell * 0.001;
-#if RRF_HOST_BUILD
-		HostTiming::AdvanceStepClocks(dwellStepClocks);
-    HostTiming::ReportSimulationClocks(dwellStepClocks);
-#endif
 		return GCodeResult::ok;
 	}
+#endif
 
 	return (gb.DoDwellTime((uint32_t)dwell)) ? GCodeResult::ok : GCodeResult::notFinished;
 }

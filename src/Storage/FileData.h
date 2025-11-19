@@ -8,11 +8,7 @@
 #ifndef FILEDATA_H_
 #define FILEDATA_H_
 
-#ifdef RRF_HOST_BUILD
-# include <Storage/FileStore.h>
-#else
-# include "FileStore.h"
-#endif
+#include "FileStore.h"
 
 #if HAS_MASS_STORAGE || HAS_SBC_INTERFACE || HAS_EMBEDDED_FILES
 

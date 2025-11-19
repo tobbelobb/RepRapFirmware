@@ -28,11 +28,7 @@ public:
 protected:
 	DECLARE_OBJECT_MODEL_WITH_ARRAYS
 
-#if RRF_HOST_BUILD
-public:  // Make constructor public for host build
-#else
 private:
-#endif
 	static KinematicsTypeDescriptor coreKinematicsDescriptor;
 
 	CoreKinematics(KinematicsType k) noexcept;
