@@ -112,6 +112,8 @@ private:
 	float k0[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	float spoolRadiiSq[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	float k2[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
+	float stepsPerMmAtOrigin[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
+	bool useConstantSpoolModel[HANGPRINTER_MAX_ANCHORS] = { false };
 	float distancesOrigin[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	float springKsOrigin[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	float relaxedSpringLengthsOrigin[HANGPRINTER_MAX_ANCHORS] = { 0.0F };

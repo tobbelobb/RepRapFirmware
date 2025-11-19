@@ -162,12 +162,27 @@ void HangprinterKinematics::Recalc() noexcept
 			)
 			/ (2.0 * Pi * motorGearTeeth[i]);
 
-		k2[i] = -(float)(mechanicalAdvantage[i] * linesPerSpool[i]) * spoolBuildupFactor;
-		k0[i] = 2.0 * stepsPerUnitTimesRTmp[i] / k2[i];
+		const float stepsPerMmThisAxis = stepsPerUnitTimesRTmp[i] / spoolRadii[i];
+		stepsPerMmAtOrigin[i] = stepsPerMmThisAxis;
+
+		const float k2Val = -(float)(mechanicalAdvantage[i] * linesPerSpool[i]) * spoolBuildupFactor;
+		if (fabsf(k2Val) <= 1.0e-9F)
+		{
+			k2[i] = 0.0F;
+			k0[i] = 0.0F;
+			useConstantSpoolModel[i] = true;
+		}
+		else
+		{
+			k2[i] = k2Val;
+			k0[i] = 2.0 * stepsPerUnitTimesRTmp[i] / k2Val;
+			useConstantSpoolModel[i] = false;
+		}
+
 		spoolRadiiSq[i] = spoolRadii[i] * spoolRadii[i];
 
 		// Calculate the steps per unit that is correct at the origin
-		move.SetDriveStepsPerMm(i, stepsPerUnitTimesRTmp[i] / spoolRadii[i], 0);
+		move.SetDriveStepsPerMm(i, stepsPerMmThisAxis, 0);
 	}
 
 	//// Flex compensation
@@ -382,7 +397,14 @@ MovementError HangprinterKinematics::CartesianToMotorSteps(const float machinePo
 	MovementError rslt = MovementError::ok;
 	for (size_t i = 0; i < numAnchors; ++i)
 	{
-		RoundToInt32(rslt, k0[i] * (fastSqrtf(spoolRadiiSq[i] + linePos[i] * k2[i]) - spoolRadii[i]), motorPos[i]);
+		if (useConstantSpoolModel[i])
+		{
+			RoundToInt32(rslt, linePos[i] * stepsPerMmAtOrigin[i], motorPos[i]);
+		}
+		else
+		{
+			RoundToInt32(rslt, k0[i] * (fastSqrtf(spoolRadiiSq[i] + linePos[i] * k2[i]) - spoolRadii[i]), motorPos[i]);
+		}
 	}
 
 	return MovementError::ok;
@@ -391,6 +413,10 @@ MovementError HangprinterKinematics::CartesianToMotorSteps(const float machinePo
 
 inline float HangprinterKinematics::MotorPosToLinePos(const int32_t motorPos, size_t axis) const noexcept
 {
+	if (useConstantSpoolModel[axis])
+	{
+		return (float)motorPos / stepsPerMmAtOrigin[axis];
+	}
 	return (fsquare(motorPos / k0[axis] + spoolRadii[axis]) - spoolRadiiSq[axis]) / k2[axis];
 }
 
