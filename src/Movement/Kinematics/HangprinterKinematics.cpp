@@ -9,6 +9,12 @@
 
 #if SUPPORT_HANGPRINTER
 
+#include <array>
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <vector>
+
 #include <Platform/RepRap.h>
 #include <GCodes/GCodeBuffer/GCodeBuffer.h>
 #include <Movement/Move.h>
@@ -16,6 +22,14 @@
 #include <Math/Matrix.h>
 
 #include <General/Portability.h>
+
+namespace HangprinterFlex {
+	struct Vec3 { float x; float y; float z; };
+	struct StaticForcesConfig;
+	struct StaticForcesResult;
+	void StaticForcesEx(const Vec3 anchors[], int numAnchors, const Vec3& mover, const StaticForcesConfig& cfg, StaticForcesResult& out);
+	void StaticForcesEx_qp(const Vec3 anchors[], int numAnchors, const Vec3& mover, const StaticForcesConfig& cfg, StaticForcesResult& out);
+}
 
 constexpr float DefaultAnchors[5][3] = {{    0.0, -2000.0, -100.0},
                                         { 2000.0,  1000.0, -100.0},
@@ -267,6 +281,7 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 	}
 	else if (mCode == 666)
 	{
+		bool seenFlexParam = false;
 		// 0=None, 1=last-top, 2=all-top, 3-half-top, etc
 		uint32_t unsignedAnchorMode = (uint32_t)anchorMode;
 		gb.TryGetUIValue('A', unsignedAnchorMode, seen);
@@ -286,9 +301,56 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 		gb.TryGetFloatArray('X', numAnchors, maxPlannedForce_Newton, seen);
 		gb.TryGetFloatArray('Y', numAnchors, guyWireLengths, seen);
 		gb.TryGetFloatArray('C', numAnchors, torqueConstants, seen);
+		int32_t flexCommand = 0;
+		if (gb.TryGetIValue('F', flexCommand, seenFlexParam))
+		{
+			bool validFlex = true;
+			if (flexCommand == 0)
+			{
+				flexEnabled = false;
+			}
+			else if (flexCommand == 1)
+			{
+				flexEnabled = true;
+				flexAlgorithm = FlexAlgorithm::Qp;
+			}
+			else if (flexCommand == 2)
+			{
+				flexEnabled = true;
+				flexAlgorithm = FlexAlgorithm::Tikhonov;
+			}
+			else
+			{
+				reply.catf("Unknown flex algorithm: %d\n", (int)flexCommand);
+				error = true;
+				validFlex = false;
+			}
+			if (validFlex)
+			{
+				seen = true;
+			}
+			else
+			{
+				seenFlexParam = false;
+			}
+		}
+		bool seenIgnoreGravity = false;
+		if (gb.TryGetBValue('G', ignoreGravity, seenIgnoreGravity))
+		{
+			seen = true;
+		}
+		bool seenIgnorePretension = false;
+		if (gb.TryGetBValue('P', ignorePretension, seenIgnorePretension))
+		{
+			seen = true;
+		}
 		if (seen)
 		{
 			Recalc();
+			if (seenFlexParam && flexEnabled && !error)
+			{
+				ApplyFlexPretension(reply);
+			}
 		}
 		else
 		{
@@ -356,6 +418,8 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 			{
 				reply.catf(":%.4f", (double)torqueConstants[i]);
 			}
+			const uint32_t flexValue = flexEnabled ? ((flexAlgorithm == FlexAlgorithm::Tikhonov) ? 2u : 1u) : 0u;
+			reply.lcatf(" F%u G%u P%u\n", flexValue, ignoreGravity ? 1u : 0u, ignorePretension ? 1u : 0u);
 
 		}
 	}
@@ -743,6 +807,11 @@ bool HangprinterKinematics::WriteCalibrationParameters(FileStore *f) const noexc
 		scratchString.catf(":%.4f", (double)torqueConstants[i]);
 	}
 	ok = f->Write(scratchString.c_str());
+	if (!ok) return false;
+
+	uint32_t flexValue = flexEnabled ? ((flexAlgorithm == FlexAlgorithm::Tikhonov) ? 2u : 1u) : 0u;
+	scratchString.printf(" F%u G%u P%u\n", flexValue, ignoreGravity ? 1u : 0u, ignorePretension ? 1u : 0u);
+	ok = f->Write(scratchString.c_str());
 
 	return ok;
 }
@@ -987,6 +1056,65 @@ void HangprinterKinematics::PrintParameters(const StringRef& reply) const noexce
 	for (size_t i = 0; i < numAnchors; ++i)
 	{
 		reply.catf(" (%.2f,%.2f,%.2f)", (double)anchors[i][X_AXIS], (double)anchors[i][Y_AXIS], (double)anchors[i][Z_AXIS]);
+	}
+	reply.cat("\n");
+}
+
+void HangprinterKinematics::ApplyFlexPretension(const StringRef& reply) noexcept
+{
+	if (!flexEnabled || numAnchors == 0)
+	{
+		reply.cat(" Flex compensation disabled.\n");
+		return;
+	}
+
+	float machinePos[MaxAxes] = { 0.0F };
+	reprap.GetMove().GetCurrentMachinePosition(machinePos, 0);
+
+	float distances[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
+	for (size_t i = 0; i < numAnchors; ++i)
+	{
+		distances[i] = hyp3(machinePos, anchors[i]);
+	}
+
+	float F[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
+	StaticForces(machinePos, F);
+
+	float springKs[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
+	for (size_t i = 0; i < numAnchors; ++i)
+	{
+		springKs[i] = SpringK(distances[i] * mechanicalAdvantage[i] + guyWireLengths[i]);
+	}
+
+	float relaxedSpringLengths[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
+	for (size_t i = 0; i < numAnchors; ++i)
+	{
+		relaxedSpringLengths[i] = distances[i] - F[i] / (springKs[i] * mechanicalAdvantage[i]);
+	}
+
+	float desiredLinePos[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
+	for (size_t i = 0; i < numAnchors; ++i)
+	{
+		desiredLinePos[i] = relaxedSpringLengths[i] - relaxedSpringLengthsOrigin[i];
+	}
+
+	reply.cat(" Flex pretension deltas:");
+	for (size_t i = 0; i < numAnchors; ++i)
+	{
+		const int32_t currentMotorPos = reprap.GetMove().GetLiveMotorPosition(i);
+		const float currentLinePos = MotorPosToLinePos(currentMotorPos, i);
+		const float deltaLine = desiredLinePos[i] - currentLinePos;
+		float targetMotorPos;
+		if (useConstantSpoolModel[i])
+		{
+			targetMotorPos = desiredLinePos[i] * stepsPerMmAtOrigin[i];
+		}
+		else
+		{
+			targetMotorPos = k0[i] * (fastSqrtf(spoolRadiiSq[i] + desiredLinePos[i] * k2[i]) - spoolRadii[i]);
+		}
+		const float deltaSteps = targetMotorPos - currentMotorPos;
+		reply.catf(" %cΔ%.4fmm/%.2f steps", ANCHOR_CHARS[i], (double)deltaLine, (double)deltaSteps);
 	}
 	reply.cat("\n");
 }
@@ -1302,23 +1430,43 @@ float HangprinterKinematics::SpringK(float const springLength) const noexcept {
 
 
 void HangprinterKinematics::StaticForces(float const machinePos[3], float F[HANGPRINTER_MAX_ANCHORS]) const noexcept {
-	switch (anchorMode) {
-		case HangprinterAnchorMode::LastOnTop:
-			if (numAnchors == 4) {
-				StaticForcesTetrahedron(machinePos, F);
-				return;
-			} else if (numAnchors == 5) {
-				StaticForcesQuadrilateralPyramid(machinePos, F);
-				return;
-			}
-			// Intentional fall-through to next case if no line flex compensation
-			[[fallthrough]];
-		case HangprinterAnchorMode::None:
-		case HangprinterAnchorMode::AllOnTop:
-		default:
-			for (size_t i = 0; i < HANGPRINTER_MAX_ANCHORS; ++i){
-				F[i] = 0.0;
-			}
+	if (!flexEnabled || moverWeight_kg <= 0.0001F || numAnchors < 3) {
+		for (size_t i = 0; i < HANGPRINTER_MAX_ANCHORS; ++i)
+		{
+			F[i] = 0.0F;
+		}
+		return;
+	}
+
+	using namespace HangprinterFlex;
+	std::array<Vec3, HANGPRINTER_MAX_ANCHORS> anchorVec{};
+	for (size_t i = 0; i < numAnchors; ++i)
+	{
+		anchorVec[i] = { anchors[i][X_AXIS], anchors[i][Y_AXIS], anchors[i][Z_AXIS] };
+	}
+	StaticForcesConfig cfg;
+	cfg.ignoreGravity = ignoreGravity;
+	cfg.ignorePretension = ignorePretension;
+	cfg.massKg = moverWeight_kg;
+	cfg.lambda = 0.001f;
+	cfg.tol = 1e-3f;
+	cfg.stepDamp = 0.75f;
+	cfg.maxItersTarget = 100;
+	cfg.Tmax = const_cast<float *>(maxPlannedForce_Newton);
+	cfg.Tmin = const_cast<float *>(minPlannedForce_Newton);
+
+	StaticForcesResult result;
+	result.tensions = F;
+	Vec3 machine = { machinePos[X_AXIS], machinePos[Y_AXIS], machinePos[Z_AXIS] };
+
+	if (flexAlgorithm == FlexAlgorithm::Tikhonov) {
+		StaticForcesEx(anchorVec.data(), (int)numAnchors, machine, cfg, result);
+	} else {
+		StaticForcesEx_qp(anchorVec.data(), (int)numAnchors, machine, cfg, result);
+	}
+
+	for (size_t i = numAnchors; i < HANGPRINTER_MAX_ANCHORS; ++i) {
+		F[i] = 0.0F;
 	}
 }
 
@@ -1541,6 +1689,513 @@ void HangprinterKinematics::StaticForcesTetrahedron(float const machinePos[3], f
 		}
 	}
 }
+
+namespace HangprinterFlex {
+constexpr int MaxAnchors = HangprinterKinematics::HANGPRINTER_MAX_ANCHORS;
+
+struct StaticForcesConfig {
+	bool ignoreGravity = false;
+	bool ignorePretension = false;
+	float massKg = 0.0f;
+	float g = 9.81f;
+	float lambda = 1e-3f;
+	float tol = 1e-3f;
+	float stepDamp = 0.75f;
+	int maxItersTarget = 100;
+	const float *Tmax = nullptr;
+	const float *Tmin = nullptr;
+};
+
+struct StaticForcesResult {
+	float *tensions = nullptr;
+	Vec3 achievedForce = {0.0f, 0.0f, 0.0f};
+	Vec3 requestedForce = {0.0f, 0.0f, 0.0f};
+	Vec3 residual = {0.0f, 0.0f, 0.0f};
+	float supportedGravityFrac = 0.0f;
+};
+
+static inline float dot(const Vec3 &a, const Vec3 &b) {
+	return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+static inline Vec3 subtract(const Vec3 &a, const Vec3 &b) {
+	return {a.x - b.x, a.y - b.y, a.z - b.z};
+}
+
+static inline float norm(const Vec3 &v) {
+	return std::sqrtf(dot(v, v));
+}
+
+static inline Vec3 unit_or_zero(const Vec3 &v) {
+	const float n = norm(v);
+	if (n > 0.0f) {
+		const float inv = 1.0f / n;
+		return {v.x * inv, v.y * inv, v.z * inv};
+	}
+	return {0.0f, 0.0f, 0.0f};
+}
+
+static inline void build_direction_matrix(const Vec3 anchors[], int N, const Vec3 &mover, float *A) {
+	for (int j = 0; j < N; ++j) {
+		Vec3 diff = subtract(anchors[j], mover);
+		const Vec3 unit = unit_or_zero(diff);
+		A[0 * N + j] = unit.x;
+		A[1 * N + j] = unit.y;
+		A[2 * N + j] = unit.z;
+	}
+}
+
+static inline bool invert3x3(const float M[3][3], float Minv[3][3], float eps = 1e-9f) {
+	const float a = M[0][0], b = M[0][1], c = M[0][2];
+	const float d = M[1][0], e = M[1][1], f = M[1][2];
+	const float g = M[2][0], h = M[2][1], i = M[2][2];
+
+	const float A = (e * i - f * h);
+	const float B = -(d * i - f * g);
+	const float C = (d * h - e * g);
+	const float D = -(b * i - c * h);
+	const float E = (a * i - c * g);
+	const float F = -(a * h - b * g);
+	const float G = (b * f - c * e);
+	const float H = -(a * f - c * d);
+	const float I = (a * e - b * d);
+
+	const float det = a * A + b * B + c * C;
+	if (std::fabs(det) < eps) {
+		return false;
+	}
+	const float invdet = 1.0f / det;
+
+	Minv[0][0] = A * invdet;
+	Minv[0][1] = D * invdet;
+	Minv[0][2] = G * invdet;
+	Minv[1][0] = B * invdet;
+	Minv[1][1] = E * invdet;
+	Minv[1][2] = H * invdet;
+	Minv[2][0] = C * invdet;
+	Minv[2][1] = F * invdet;
+	Minv[2][2] = I * invdet;
+	return true;
+}
+
+static inline void solve_min_norm_T(const float *A, int N, const Vec3 &Fext, float lambda, float *T) {
+	float S[3][3] = {{lambda, 0.0f, 0.0f}, {0.0f, lambda, 0.0f}, {0.0f, 0.0f, lambda}};
+	for (int j = 0; j < N; ++j) {
+		const float ax = A[0 * N + j], ay = A[1 * N + j], az = A[2 * N + j];
+		S[0][0] += ax * ax;
+		S[0][1] += ax * ay;
+		S[0][2] += ax * az;
+		S[1][0] += ay * ax;
+		S[1][1] += ay * ay;
+		S[1][2] += ay * az;
+		S[2][0] += az * ax;
+		S[2][1] += az * ay;
+		S[2][2] += az * az;
+	}
+
+	float Sinv[3][3];
+	if (!invert3x3(S, Sinv)) {
+		S[0][0] += 1e-6f;
+		S[1][1] += 1e-6f;
+		S[2][2] += 1e-6f;
+		invert3x3(S, Sinv);
+	}
+	const float y0 = Sinv[0][0] * Fext.x + Sinv[0][1] * Fext.y + Sinv[0][2] * Fext.z;
+	const float y1 = Sinv[1][0] * Fext.x + Sinv[1][1] * Fext.y + Sinv[1][2] * Fext.z;
+	const float y2 = Sinv[2][0] * Fext.x + Sinv[2][1] * Fext.y + Sinv[2][2] * Fext.z;
+
+	for (int j = 0; j < N; ++j) {
+		const float ax = A[0 * N + j], ay = A[1 * N + j], az = A[2 * N + j];
+		T[j] = ax * y0 + ay * y1 + az * y2;
+	}
+}
+
+static inline void build_null_projector(const float *A, int N, float lambda, float *P) {
+	float S[3][3] = {{lambda, 0.0f, 0.0f}, {0.0f, lambda, 0.0f}, {0.0f, 0.0f, lambda}};
+	for (int j = 0; j < N; ++j) {
+		const float ax = A[0 * N + j], ay = A[1 * N + j], az = A[2 * N + j];
+		S[0][0] += ax * ax;
+		S[0][1] += ax * ay;
+		S[0][2] += ax * az;
+		S[1][0] += ay * ax;
+		S[1][1] += ay * ay;
+		S[1][2] += ay * az;
+		S[2][0] += az * ax;
+		S[2][1] += az * ay;
+		S[2][2] += az * az;
+	}
+
+	float Sinv[3][3];
+	if (!invert3x3(S, Sinv)) {
+		S[0][0] += 1e-6f;
+		S[1][1] += 1e-6f;
+		S[2][2] += 1e-6f;
+		invert3x3(S, Sinv);
+	}
+
+	for (int r = 0; r < N; ++r) {
+		for (int c = 0; c < N; ++c) {
+			const float ax = A[0 * N + c], ay = A[1 * N + c], az = A[2 * N + c];
+			const float B0 = Sinv[0][0] * ax + Sinv[0][1] * ay + Sinv[0][2] * az;
+			const float B1 = Sinv[1][0] * ax + Sinv[1][1] * ay + Sinv[1][2] * az;
+			const float B2 = Sinv[2][0] * ax + Sinv[2][1] * ay + Sinv[2][2] * az;
+			const float arx = A[0 * N + r], ary = A[1 * N + r], arz = A[2 * N + r];
+			const float Mrc = arx * B0 + ary * B1 + arz * B2;
+			P[r * N + c] = (r == c ? 1.0f : 0.0f) - Mrc;
+		}
+	}
+}
+
+static inline void proj_nullspace(const float *P, int N, const float *v, float *out) {
+	for (int r = 0; r < N; ++r) {
+		float acc = 0.0f;
+		for (int c = 0; c < N; ++c) {
+			acc += P[r * N + c] * v[c];
+		}
+		out[r] = acc;
+	}
+}
+
+static inline bool chol_decompose(std::vector<double> &G, int k) {
+	const double eps = 1e-14;
+	for (int i = 0; i < k; ++i) {
+		for (int j = 0; j <= i; ++j) {
+			double s = G[i * k + j];
+			for (int p = 0; p < j; ++p) {
+				s -= G[i * k + p] * G[j * k + p];
+			}
+			if (i == j) {
+				if (s <= eps) {
+					s = eps;
+				}
+				G[i * k + j] = std::sqrt(s);
+			} else {
+				G[i * k + j] = s / G[j * k + j];
+			}
+		}
+		for (int j = i + 1; j < k; ++j) {
+			G[i * k + j] = 0.0;
+		}
+	}
+	return true;
+}
+
+static inline void chol_solve(const std::vector<double> &L, int k, const std::vector<double> &b, std::vector<double> &x) {
+	std::vector<double> y(k, 0.0);
+	for (int i = 0; i < k; ++i) {
+		double s = b[i];
+		for (int p = 0; p < i; ++p) {
+			s -= L[i * k + p] * y[p];
+		}
+		y[i] = s / L[i * k + i];
+	}
+	x.assign(k, 0.0);
+	for (int i = k - 1; i >= 0; --i) {
+		double s = y[i];
+		for (int p = i + 1; p < k; ++p) {
+			s -= L[p * k + i] * x[p];
+		}
+		x[i] = s / L[i * k + i];
+	}
+}
+
+static inline void solve_box_ridge_ls(const float *A, int N, const Vec3 &F, double lambda, const double *L, const double *U, int max_iters, double tol, double *T_out) {
+	std::vector<double> H(N * N, 0.0);
+	std::vector<double> f(N, 0.0);
+	for (int i = 0; i < N; ++i) {
+		const double aix = A[0 * N + i], aiy = A[1 * N + i], aiz = A[2 * N + i];
+		f[i] = aix * F.x + aiy * F.y + aiz * F.z;
+		for (int j = 0; j <= i; ++j) {
+			const double ajx = A[0 * N + j], ajy = A[1 * N + j], ajz = A[2 * N + j];
+			const double dot = aix * ajx + aiy * ajy + aiz * ajz;
+			const double v = dot + (i == j ? lambda : 0.0);
+			H[i * N + j] = v;
+			H[j * N + i] = v;
+		}
+	}
+
+	std::vector<double> Lfull = H;
+	chol_decompose(Lfull, N);
+	std::vector<double> t(N, 0.0);
+	chol_solve(Lfull, N, f, t);
+	for (int i = 0; i < N; ++i) {
+		double li = L ? L[i] : 0.0;
+		double ui = U ? U[i] : std::numeric_limits<double>::infinity();
+		if (ui < li) {
+			ui = li;
+		}
+		t[i] = std::min(std::max(t[i], li), ui);
+	}
+
+	std::vector<int> free_idx;
+	free_idx.reserve(N);
+	std::vector<double> g(N, 0.0);
+
+	auto projected_grad_norm = [&](const std::vector<double> &x) {
+		double s2 = 0.0;
+		for (int i = 0; i < N; ++i) {
+			double li = L ? L[i] : 0.0;
+			double ui = U ? U[i] : std::numeric_limits<double>::infinity();
+			if (ui < li) {
+				ui = li;
+			}
+			double gi = 0.0;
+			for (int j = 0; j < N; ++j) {
+				gi += H[i * N + j] * x[j];
+			}
+			gi -= f[i];
+			const bool atL = (x[i] <= li + 1e-12);
+			const bool atU = (x[i] >= ui - 1e-12);
+			double pgi = gi;
+			if (atL && gi > 0) {
+				pgi = 0.0;
+			}
+			if (atU && gi < 0) {
+				pgi = 0.0;
+			}
+			s2 += pgi * pgi;
+		}
+		return std::sqrt(s2);
+	};
+
+	for (int it = 0; it < max_iters; ++it) {
+		for (int i = 0; i < N; ++i) {
+			double gi = 0.0;
+			for (int j = 0; j < N; ++j) {
+				gi += H[i * N + j] * t[j];
+			}
+			g[i] = gi - f[i];
+		}
+		free_idx.clear();
+		for (int i = 0; i < N; ++i) {
+			double li = L ? L[i] : 0.0;
+			double ui = U ? U[i] : std::numeric_limits<double>::infinity();
+			if (ui < li) {
+				ui = li;
+			}
+			const bool atL = (t[i] <= li + 1e-12);
+			const bool atU = (t[i] >= ui - 1e-12);
+			const bool violateL = atL && (g[i] < -tol);
+			const bool violateU = atU && (g[i] > tol);
+			if ((!atL && !atU) || violateL || violateU) {
+				free_idx.push_back(i);
+			}
+		}
+		if (projected_grad_norm(t) <= tol) {
+			break;
+		}
+		if (free_idx.empty()) {
+			int best = 0;
+			double bestViol = 0.0;
+			for (int i = 0; i < N; ++i) {
+				double li = L ? L[i] : 0.0;
+				double ui = U ? U[i] : std::numeric_limits<double>::infinity();
+				if (ui < li) {
+					ui = li;
+				}
+				const bool atL = (t[i] <= li + 1e-12);
+				const bool atU = (t[i] >= ui - 1e-12);
+				double viol = 0.0;
+				if (atL) {
+					viol = std::max(0.0, -g[i]);
+				}
+				if (atU) {
+					viol = std::max(viol, g[i]);
+				}
+				if (viol > bestViol) {
+					bestViol = viol;
+					best = i;
+				}
+			}
+			free_idx.push_back(best);
+		}
+		const int k = (int)free_idx.size();
+		std::vector<double> Hff(k * k, 0.0), gf(k, 0.0), pf(k, 0.0);
+		for (int p = 0; p < k; ++p) {
+			const int ip = free_idx[p];
+			gf[p] = g[ip];
+			for (int q = 0; q < k; ++q) {
+				const int iq = free_idx[q];
+				Hff[p * k + q] = H[ip * N + iq];
+			}
+		}
+		chol_decompose(Hff, k);
+		for (int i = 0; i < k; ++i) {
+			gf[i] = -gf[i];
+		}
+		chol_solve(Hff, k, gf, pf);
+		double alpha = 1.0;
+		for (int idx = 0; idx < k; ++idx) {
+			const int i = free_idx[idx];
+			const double pi = pf[idx];
+			if (std::abs(pi) < 1e-16) {
+				continue;
+			}
+			double li = L ? L[i] : 0.0;
+			double ui = U ? U[i] : std::numeric_limits<double>::infinity();
+			if (ui < li) {
+				ui = li;
+			}
+			if (pi > 0.0) {
+				const double amax = (ui - t[i]) / pi;
+				if (amax < alpha) {
+					alpha = std::max(0.0, amax);
+				}
+			} else {
+				const double amax = (li - t[i]) / pi;
+				if (amax < alpha) {
+					alpha = std::max(0.0, amax);
+				}
+			}
+		}
+		for (int idx = 0; idx < k; ++idx) {
+			const int i = free_idx[idx];
+			t[i] += alpha * pf[idx];
+		}
+		for (int i = 0; i < N; ++i) {
+			double li = L ? L[i] : 0.0;
+			double ui = U ? U[i] : std::numeric_limits<double>::infinity();
+			if (ui < li) {
+				ui = li;
+			}
+			if (t[i] < li) {
+				t[i] = li;
+			}
+			if (t[i] > ui) {
+				t[i] = ui;
+			}
+		}
+	}
+
+	for (int i = 0; i < N; ++i) {
+		T_out[i] = t[i];
+	}
+}
+
+void StaticForcesEx(
+	const Vec3 anchors[], int N,
+	const Vec3 &mover,
+	const StaticForcesConfig &cfg,
+	StaticForcesResult &out)
+{
+	if (N <= 0 || out.tensions == nullptr) {
+		return;
+	}
+	float *T = out.tensions;
+	float A[3 * MaxAnchors] = {0.0f};
+	build_direction_matrix(anchors, N, mover, A);
+
+	out.requestedForce = {0.0f, 0.0f, 0.0f};
+	for (int i = 0; i < N; ++i) {
+		T[i] = 0.0f;
+	}
+
+	if (!cfg.ignoreGravity) {
+		out.requestedForce = {0.0f, 0.0f, cfg.massKg * cfg.g};
+		solve_min_norm_T(A, N, out.requestedForce, cfg.lambda, T);
+	}
+
+	if (!cfg.ignorePretension) {
+		float P[MaxAnchors * MaxAnchors] = {0.0f};
+		build_null_projector(A, N, cfg.lambda, P);
+		for (int it = 0; it < cfg.maxItersTarget; ++it) {
+			float gradient[MaxAnchors] = {0.0f};
+			for (int i = 0; i < N; ++i) {
+				float target_grad = 0.1f * (T[i] - (cfg.Tmin ? cfg.Tmin[i] : 0.0f));
+				if (cfg.Tmax && T[i] > cfg.Tmax[i]) {
+					target_grad += T[i] - cfg.Tmax[i];
+				}
+				if (cfg.Tmin && T[i] < cfg.Tmin[i]) {
+					target_grad += T[i] - cfg.Tmin[i];
+				}
+				gradient[i] = target_grad;
+			}
+			float d[MaxAnchors] = {0.0f};
+			proj_nullspace(P, N, gradient, d);
+			float dn = 0.0f;
+			for (int i = 0; i < N; ++i) {
+				dn += d[i] * d[i];
+			}
+			if (dn < cfg.tol * cfg.tol) {
+				break;
+			}
+			for (int i = 0; i < N; ++i) {
+				T[i] -= cfg.stepDamp * d[i];
+			}
+		}
+		for (int i = 0; i < N; ++i) {
+			if (T[i] < 0.0f) {
+				T[i] = 0.0f;
+			}
+			if (cfg.Tmax && T[i] > cfg.Tmax[i]) {
+				T[i] = cfg.Tmax[i];
+			}
+			if (cfg.Tmin && T[i] < cfg.Tmin[i]) {
+				T[i] = cfg.Tmin[i];
+			}
+		}
+	}
+
+	out.achievedForce = applyA(A, N, T);
+	out.residual = {
+		out.requestedForce.x - out.achievedForce.x,
+		out.requestedForce.y - out.achievedForce.y,
+		out.requestedForce.z - out.achievedForce.z
+	};
+	out.supportedGravityFrac = 0.0f;
+	if (!cfg.ignoreGravity && out.requestedForce.z > 1e-9f) {
+		out.supportedGravityFrac = out.achievedForce.z / out.requestedForce.z;
+	}
+}
+
+void StaticForcesEx_qp(
+	const Vec3 anchors[], int N,
+	const Vec3 &mover,
+	const StaticForcesConfig &cfg,
+	StaticForcesResult &out)
+{
+	if (N <= 0 || out.tensions == nullptr) {
+		return;
+	}
+	float *T = out.tensions;
+	float A[3 * MaxAnchors] = {0.0f};
+	build_direction_matrix(anchors, N, mover, A);
+
+	out.requestedForce = {0.0f, 0.0f, 0.0f};
+	if (!cfg.ignoreGravity) {
+		out.requestedForce = {0.0f, 0.0f, cfg.massKg * cfg.g};
+	}
+
+	std::vector<double> L(N, 0.0), U(N, std::numeric_limits<double>::infinity());
+	for (int i = 0; i < N; ++i) {
+		const double li = cfg.ignorePretension ? 0.0 : (cfg.Tmin ? cfg.Tmin[i] : 0.0);
+		double ui = (cfg.Tmax ? cfg.Tmax[i] : std::numeric_limits<double>::infinity());
+		if (ui < li) {
+			ui = li;
+		}
+		L[i] = li;
+		U[i] = ui;
+	}
+
+	std::vector<double> Td(N, 0.0);
+	solve_box_ridge_ls(A, N, out.requestedForce, cfg.lambda, L.data(), U.data(), cfg.maxItersTarget, cfg.tol, Td.data());
+
+	for (int i = 0; i < N; ++i) {
+		T[i] = (float)Td[i];
+	}
+
+	out.achievedForce = applyA(A, N, Td.data());
+	out.residual = {
+		out.requestedForce.x - out.achievedForce.x,
+		out.requestedForce.y - out.achievedForce.y,
+		out.requestedForce.z - out.achievedForce.z
+	};
+	out.supportedGravityFrac = 0.0f;
+	if (!cfg.ignoreGravity && out.requestedForce.z > 1e-9f) {
+		out.supportedGravityFrac = out.achievedForce.z / out.requestedForce.z;
+	}
+}
+} // namespace HangprinterFlex
 
 #endif // SUPPORT_HANGPRINTER
 

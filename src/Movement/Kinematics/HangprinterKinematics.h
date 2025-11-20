@@ -64,6 +64,7 @@ protected:
 
 private:
 	static KinematicsTypeDescriptor hangprinterKinematicsDescriptor;
+	enum class FlexAlgorithm : uint8_t { None = 0, Qp = 1, Tikhonov = 2 };
 
 	// Basic facts about movement system
 	static constexpr const char*_ecv_array ANCHOR_CHARS = "ABCDIJKLO";
@@ -81,6 +82,7 @@ private:
 	float MotorPosToLinePos(const int32_t motorPos, size_t axis) const noexcept;
 
 	void PrintParameters(const StringRef& reply) const noexcept;			// Print all the parameters for debugging
+	void ApplyFlexPretension(const StringRef& reply) noexcept;
 
 	// The real defaults are in the cpp file
 	HangprinterAnchorMode anchorMode = HangprinterAnchorMode::LastOnTop;
@@ -107,6 +109,11 @@ private:
 	float guyWireLengths[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	float targetForce_Newton = 0.0F;
 	float torqueConstants[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
+
+	FlexAlgorithm flexAlgorithm = FlexAlgorithm::Qp;
+	bool flexEnabled = false;
+	bool ignoreGravity = false;
+	bool ignorePretension = false;
 
 	// Derived parameters
 	float k0[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
