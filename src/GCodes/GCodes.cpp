@@ -440,6 +440,7 @@ void GCodes::Spin() noexcept
 
 	// The autoPause buffer has priority, so spin that one first. It may have to wait for other buffers to release locks etc.
 	(void)SpinGCodeBuffer(*AutoPauseGCode());
+	ProcessImmediateCommands();
 
 	// Use round-robin scheduling for the other input sources
 	// Scan the GCode input channels until we find one that we can do some useful work with, or we have scanned them all.

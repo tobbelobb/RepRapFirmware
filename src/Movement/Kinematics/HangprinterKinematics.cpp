@@ -17,11 +17,13 @@
 
 #include <Platform/RepRap.h>
 #include <GCodes/GCodeBuffer/GCodeBuffer.h>
+#include <GCodes/GCodes.h>
 #include <Movement/Move.h>
 #include <CAN/CanInterface.h>
 #include <Math/Matrix.h>
 
 #include <General/Portability.h>
+#include <General/String.h>
 
 
 constexpr float DefaultAnchors[5][3] = {{    0.0, -2000.0, -100.0},
@@ -993,6 +995,8 @@ void HangprinterKinematics::ApplyFlexPretension(const StringRef& reply) noexcept
 	float machinePos[MaxAxes] = { 0.0F };
 	reprap.GetMove().GetCurrentMachinePosition(machinePos, 0);
 	float desiredLinePos[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
+	float lineDelta[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
+	bool hasMovement = false;
 
 	float distances[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	for (size_t i = 0; i < numAnchors; ++i)
@@ -1030,6 +1034,11 @@ void HangprinterKinematics::ApplyFlexPretension(const StringRef& reply) noexcept
 		const int32_t currentMotorPos = reprap.GetMove().GetLiveMotorPosition(i);
 		const float currentLinePos = MotorPosToLinePos(currentMotorPos, i);
 		const float deltaLine = desiredLinePos[i] - currentLinePos;
+		lineDelta[i] = deltaLine;
+		if (fabsf(deltaLine) > 1.0e-6F)
+		{
+			hasMovement = true;
+		}
 		float targetMotorPos;
 		if (useConstantSpoolModel[i])
 		{
@@ -1040,7 +1049,34 @@ void HangprinterKinematics::ApplyFlexPretension(const StringRef& reply) noexcept
 			targetMotorPos = k0[i] * (fastSqrtf(spoolRadiiSq[i] + desiredLinePos[i] * k2[i]) - spoolRadii[i]);
 		}
 		const float deltaSteps = targetMotorPos - currentMotorPos;
-		reply.catf(" %cΔ%.4fmm/%.2f steps", ANCHOR_CHARS[i], (double)deltaLine, (double)deltaSteps);
+		reply.catf(" %cΔ%.4fmm/%.2f steps", ANCHOR_CHARS[i], (double)lineDelta[i], (double)deltaSteps);
+	}
+
+	if (!hasMovement)
+	{
+		return;
+	}
+
+	constexpr float FlexPretensionFeedrateMmPerMin = 500.0F;
+	const char *_ecv_array const axisLetters = reprap.GetGCodes().GetAxisLetters();
+	String<192> moveCmd;
+	moveCmd.copy("G1 H2");
+	moveCmd.catf(" F%.0f", (double)FlexPretensionFeedrateMmPerMin);
+	const size_t totalAxes = reprap.GetGCodes().GetTotalAxes();
+	for (size_t i = 0; i < numAnchors && i < totalAxes; ++i)
+	{
+		const char axisLetter = axisLetters[i];
+		if (axisLetter != 0)
+		{
+			moveCmd.catf(" %c%.4f", axisLetter, (double)lineDelta[i]);
+		}
+	}
+
+	if (!reprap.GetGCodes().QueueImmediateGCode("G91")
+		|| !reprap.GetGCodes().QueueImmediateGCode(moveCmd.c_str())
+		|| !reprap.GetGCodes().QueueImmediateGCode("G90"))
+	{
+		reply.cat("Pretension move deferred because the immediate-command queue is full\n");
 	}
 }
 
