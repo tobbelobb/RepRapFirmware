@@ -84,7 +84,7 @@ private:
 	float MotorPosToLinePos(const int32_t motorPos, size_t axis) const noexcept;
 
 	void PrintParameters(const StringRef& reply) const noexcept;			// Print all the parameters for debugging
-	void ApplyFlexPretension(const StringRef& reply) noexcept;
+	void ApplyFlexPretension(GCodeBuffer& gb, const StringRef& reply) noexcept;
 
 	// The real defaults are in the cpp file
 	HangprinterAnchorMode anchorMode = HangprinterAnchorMode::LastOnTop;

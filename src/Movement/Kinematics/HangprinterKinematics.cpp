@@ -17,7 +17,9 @@
 
 #include <Platform/RepRap.h>
 #include <GCodes/GCodeBuffer/GCodeBuffer.h>
+#define private public
 #include <GCodes/GCodes.h>
+#undef private
 #include <Movement/Move.h>
 #include <CAN/CanInterface.h>
 #include <Math/Matrix.h>
@@ -203,10 +205,10 @@ void HangprinterKinematics::Recalc() noexcept
 // Return true if we changed any parameters that affect the geometry. Set 'error' true if there was an error, otherwise leave it alone.
 bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const StringRef& reply, bool& error) THROWS(GCodeException) /*override*/
 {
-	bool seen = false;
 	bool requiresRehome = false;
 	if (mCode == 669)
 	{
+		bool seen = false;
 		const bool seenNonGeometry = TryConfigureSegmentation(gb);
 		if (gb.Seen('N'))
 		{
@@ -241,12 +243,16 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 	}
 	else if (mCode == 666)
 	{
+		bool seen = false;
+		bool anyParamSeen = false;
 		bool geometryChanged = false;
+		bool runPretension = false;
 		bool seenFlexParam = false;
 		// 0=None, 1=last-top, 2=all-top, 3-half-top, etc
 		uint32_t unsignedAnchorMode = (uint32_t)anchorMode;
 		if (gb.TryGetUIValue('A', unsignedAnchorMode, seen))
 		{
+			anyParamSeen = true;
 			geometryChanged = true;
 			if (unsignedAnchorMode <= (uint32_t)HangprinterAnchorMode::AllOnTop) {
 				anchorMode = (HangprinterAnchorMode)unsignedAnchorMode;
@@ -254,54 +260,67 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 		}
 		if (gb.TryGetFValue('Q', spoolBuildupFactor, seen))
 		{
+			anyParamSeen = true;
 			geometryChanged = true;
 		}
 		if (gb.TryGetFloatArray('R', numAnchors, spoolRadii, seen))
 		{
+			anyParamSeen = true;
 			geometryChanged = true;
 		}
 		if (gb.TryGetUIArray('U', numAnchors, mechanicalAdvantage, seen))
 		{
+			anyParamSeen = true;
 			geometryChanged = true;
 		}
 		if (gb.TryGetUIArray('O', numAnchors, linesPerSpool, seen))
 		{
+			anyParamSeen = true;
 			geometryChanged = true;
 		}
 		if (gb.TryGetUIArray('L', numAnchors, motorGearTeeth, seen))
 		{
+			anyParamSeen = true;
 			geometryChanged = true;
 		}
 		if (gb.TryGetUIArray('H', numAnchors, spoolGearTeeth, seen))
 		{
+			anyParamSeen = true;
 			geometryChanged = true;
 		}
 		if (gb.TryGetUIArray('J', numAnchors, fullStepsPerMotorRev, seen))
 		{
+			anyParamSeen = true;
 			geometryChanged = true;
 		}
 		if (gb.TryGetFValue('W', moverWeight_kg, seen))
 		{
+			anyParamSeen = true;
 			geometryChanged = true;
 		}
 		if (gb.TryGetFValue('S', springKPerUnitLength, seen))
 		{
+			anyParamSeen = true;
 			geometryChanged = true;
 		}
 		if (gb.TryGetFloatArray('I', numAnchors, minForce_Newton, seen))
 		{
+			anyParamSeen = true;
 			geometryChanged = true;
 		}
 		if (gb.TryGetFloatArray('X', numAnchors, maxForce_Newton, seen))
 		{
+			anyParamSeen = true;
 			geometryChanged = true;
 		}
 		if (gb.TryGetFloatArray('Y', numAnchors, guyWireLengths, seen))
 		{
+			anyParamSeen = true;
 			geometryChanged = true;
 		}
 		if (gb.TryGetFloatArray('C', numAnchors, torqueConstants, seen))
 		{
+			anyParamSeen = true;
 			geometryChanged = true;
 		}
 		int32_t flexCommand = 0;
@@ -330,7 +349,8 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 			}
 			if (validFlex)
 			{
-				seen = true;
+				anyParamSeen = true;
+				runPretension = true;
 			}
 			else
 			{
@@ -339,18 +359,20 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 		}
 		if (gb.TryGetBValue('B', ignoreGravity, seen))
 		{
+			anyParamSeen = true;
 			geometryChanged = true;
 		}
 		if (gb.TryGetBValue('P', ignorePretension, seen))
 		{
+			anyParamSeen = true;
 			geometryChanged = true;
 		}
-		if (seen)
+		if (anyParamSeen)
 		{
 			Recalc();
-			if (seenFlexParam && !error)
+			if (runPretension && !error)
 			{
-				ApplyFlexPretension(reply);
+				ApplyFlexPretension(gb, reply);
 			}
 		}
 		else
@@ -1042,9 +1064,17 @@ void HangprinterKinematics::PrintParameters(const StringRef& reply) const noexce
 	reply.cat("\n");
 }
 
-void HangprinterKinematics::ApplyFlexPretension(const StringRef& reply) noexcept
+void HangprinterKinematics::ApplyFlexPretension(GCodeBuffer& gb, const StringRef& reply) noexcept
 {
 	GCodes& gCodes = reprap.GetGCodes();
+	const auto markAxesHomed = [&gCodes]() noexcept
+	{
+		const size_t visibleAxes = gCodes.GetVisibleAxes();
+		for (size_t axis = 0; axis < visibleAxes; ++axis)
+		{
+			gCodes.SetAxisIsHomed(axis);
+		}
+	};
 
 	float machinePos[MaxAxes] = { 0.0F };
 	reprap.GetMove().GetCurrentMachinePosition(machinePos, 0);
@@ -1066,8 +1096,8 @@ void HangprinterKinematics::ApplyFlexPretension(const StringRef& reply) noexcept
 	float flex[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	if (flexEnabled)
 	{
-		bool const ignoreGravityTmp = ignoreGravity;
-		bool const ignorePretensionTmp = ignorePretension;
+		const bool ignoreGravityTmp = ignoreGravity;
+		const bool ignorePretensionTmp = ignorePretension;
 		ignoreGravity = true;
 		ignorePretension = false;
 		flexDistances(machinePos, distances, flex);
@@ -1117,7 +1147,6 @@ void HangprinterKinematics::ApplyFlexPretension(const StringRef& reply) noexcept
 		return;
 	}
 
-  /*
 	constexpr float FlexPretensionFeedrateMmPerMin = 500.0F;
 	const char *_ecv_array const axisLetters = gCodes.GetAxisLetters();
 	String<192> moveCmd;
@@ -1133,30 +1162,39 @@ void HangprinterKinematics::ApplyFlexPretension(const StringRef& reply) noexcept
 		}
 	}
 
-	GCodeBuffer *const macroGb = gCodes.GetGCodeBuffer(GCodeChannel::Autopause);
-	if (macroGb == nullptr)
+	const auto runInlineCommand = [&gb, &gCodes, &reply](const char *_ecv_array cmd) noexcept
 	{
-		reply.cat("Pretension move cancelled because the autopause buffer is not available\n");
+		if (!gb.PushState(true))
+		{
+			reply.cat("Pretension move deferred (stack overflow)\n");
+			return false;
+		}
+		gb.Init();
+		gb.PutAndDecode(cmd);
+		(void)gCodes.ActOnCode(gb, reply);
+		(void)gb.PopState(true);
+		return true;
+	};
+
+	const bool wasRelative = gb.LatestMachineState().axesRelative;
+	if (!wasRelative && !runInlineCommand("G91"))
+	{
 		return;
 	}
-
-	if (!macroGb->IsCompletelyIdle())
+	if (!runInlineCommand(moveCmd.c_str()))
 	{
-		reply.cat("Pretension move deferred because the autopause buffer is busy\n");
+		if (!wasRelative)
+		{
+			(void)runInlineCommand("G90");
+		}
 		return;
 	}
+	if (!wasRelative)
+	{
+		(void)runInlineCommand("G90");
+	}
 
-	const bool wasRelative = macroGb->LatestMachineState().axesRelative;
-	if (!wasRelative)
-	{
-		macroGb->PutAndDecode("G91");
-	}
-	macroGb->PutAndDecode(moveCmd.c_str());
-	if (!wasRelative)
-	{
-		macroGb->PutAndDecode("G90");
-	}
-  */
+	markAxesHomed();
 }
 
 #if DUAL_CAN
