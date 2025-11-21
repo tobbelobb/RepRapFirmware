@@ -23,13 +23,6 @@
 
 #include <General/Portability.h>
 
-namespace HangprinterFlex {
-	struct Vec3 { float x; float y; float z; };
-	struct StaticForcesConfig;
-	struct StaticForcesResult;
-	void StaticForcesEx(const Vec3 anchors[], int numAnchors, const Vec3& mover, const StaticForcesConfig& cfg, StaticForcesResult& out);
-	void StaticForcesEx_qp(const Vec3 anchors[], int numAnchors, const Vec3& mover, const StaticForcesConfig& cfg, StaticForcesResult& out);
-}
 
 constexpr float DefaultAnchors[5][3] = {{    0.0, -2000.0, -100.0},
                                         { 2000.0,  1000.0, -100.0},
@@ -419,8 +412,7 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 				reply.catf(":%.4f", (double)torqueConstants[i]);
 			}
 			const uint32_t flexValue = flexEnabled ? ((flexAlgorithm == FlexAlgorithm::Tikhonov) ? 2u : 1u) : 0u;
-			reply.lcatf(" F%u G%u P%u\n", flexValue, ignoreGravity ? 1u : 0u, ignorePretension ? 1u : 0u);
-
+			reply.lcatf("F%u G%u P%u", flexValue, ignoreGravity ? 1u : 0u, ignorePretension ? 1u : 0u);
 		}
 	}
 	else
@@ -439,23 +431,12 @@ MovementError HangprinterKinematics::CartesianToMotorSteps(const float machinePo
 		distances[i] = hyp3(machinePos, anchors[i]);
 	}
 
-	float springKs[HANGPRINTER_MAX_ANCHORS];
-	for (size_t i = 0; i < numAnchors; ++i) {
-		springKs[i] = SpringK(distances[i] * mechanicalAdvantage[i] + guyWireLengths[i]);
-	}
-
-	float F[HANGPRINTER_MAX_ANCHORS] = { 0.0F }; // desired force in each direction
-	StaticForces(machinePos, F);
-
-	float relaxedSpringLengths[HANGPRINTER_MAX_ANCHORS];
-	for (size_t i{0}; i < numAnchors; ++i) {
-		relaxedSpringLengths[i] = distances[i] - F[i] / (springKs[i] * mechanicalAdvantage[i]);
-		// The second term there is the mover's movement in mm due to flex
-	}
+	float flex[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
+	flexDistances(machinePos, distances, flex);
 
 	float linePos[HANGPRINTER_MAX_ANCHORS];
 	for (size_t i = 0; i < numAnchors; ++i) {
-		linePos[i] = relaxedSpringLengths[i] - relaxedSpringLengthsOrigin[i];
+		linePos[i] = distances[i] - flex[i];
 	}
 
 	MovementError rslt = MovementError::ok;
@@ -495,23 +476,8 @@ void HangprinterKinematics::flexDistances(float const machinePos[3], float const
 	float F[HANGPRINTER_MAX_ANCHORS] = { 0.0F }; // desired force in each direction
 	StaticForces(machinePos, F);
 
-	float relaxedSpringLengths[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	for (size_t i = 0; i < numAnchors; ++i) {
-		relaxedSpringLengths[i] = distances[i]- F[i] / (springKs[i] * mechanicalAdvantage[i]);
-	};
-
-	float linePos[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
-	for (size_t i = 0; i < numAnchors; ++i) {
-		linePos[i] = relaxedSpringLengths[i] - relaxedSpringLengthsOrigin[i];
-	};
-
-	float distanceDifferences[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
-	for (size_t i = 0; i < numAnchors; ++i) {
-		distanceDifferences[i] = distances[i] - distancesOrigin[i];
-	};
-
-	for (size_t i = 0; i < numAnchors; ++i) {
-		flex[i] = linePos[i] - distanceDifferences[i];
+		flex[i] = F[i] / (springKs[i] * mechanicalAdvantage[i]);
 	}
 }
 
@@ -1062,7 +1028,7 @@ void HangprinterKinematics::PrintParameters(const StringRef& reply) const noexce
 
 void HangprinterKinematics::ApplyFlexPretension(const StringRef& reply) noexcept
 {
-	if (!flexEnabled || numAnchors == 0)
+	if (!flexEnabled)
 	{
 		reply.cat(" Flex compensation disabled.\n");
 		return;
@@ -1077,25 +1043,19 @@ void HangprinterKinematics::ApplyFlexPretension(const StringRef& reply) noexcept
 		distances[i] = hyp3(machinePos, anchors[i]);
 	}
 
-	float F[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
-	StaticForces(machinePos, F);
-
-	float springKs[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
-	for (size_t i = 0; i < numAnchors; ++i)
-	{
-		springKs[i] = SpringK(distances[i] * mechanicalAdvantage[i] + guyWireLengths[i]);
-	}
-
-	float relaxedSpringLengths[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
-	for (size_t i = 0; i < numAnchors; ++i)
-	{
-		relaxedSpringLengths[i] = distances[i] - F[i] / (springKs[i] * mechanicalAdvantage[i]);
-	}
+	bool const ignoreGravityTmp = ignoreGravity;
+	bool const ignorePretensionTmp = ignorePretension;
+	ignoreGravity = true;
+	ignorePretension = false;
+	float flex[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
+	flexDistances(machinePos, distances, flex);
+	ignoreGravity = ignoreGravityTmp;
+	ignorePretension = ignorePretensionTmp;
 
 	float desiredLinePos[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	for (size_t i = 0; i < numAnchors; ++i)
 	{
-		desiredLinePos[i] = relaxedSpringLengths[i] - relaxedSpringLengthsOrigin[i];
+		desiredLinePos[i] = distances[i] - distancesOrigin[i] - flex[i];
 	}
 
 	reply.cat(" Flex pretension deltas:");
@@ -1430,7 +1390,7 @@ float HangprinterKinematics::SpringK(float const springLength) const noexcept {
 
 
 void HangprinterKinematics::StaticForces(float const machinePos[3], float F[HANGPRINTER_MAX_ANCHORS]) const noexcept {
-	if (!flexEnabled || moverWeight_kg <= 0.0001F || numAnchors < 3) {
+	if (!flexEnabled) {
 		for (size_t i = 0; i < HANGPRINTER_MAX_ANCHORS; ++i)
 		{
 			F[i] = 0.0F;
@@ -1438,11 +1398,11 @@ void HangprinterKinematics::StaticForces(float const machinePos[3], float F[HANG
 		return;
 	}
 
-	using namespace HangprinterFlex;
-	std::array<Vec3, HANGPRINTER_MAX_ANCHORS> anchorVec{};
+	// TODO: We don't want this Vec3 data type and we don't want to create a copy of the anchor data here
+	Vec3 anchorVecs[HANGPRINTER_MAX_ANCHORS] = { 0.0f };
 	for (size_t i = 0; i < numAnchors; ++i)
 	{
-		anchorVec[i] = { anchors[i][X_AXIS], anchors[i][Y_AXIS], anchors[i][Z_AXIS] };
+		anchorVecs[i] = { anchors[i][X_AXIS], anchors[i][Y_AXIS], anchors[i][Z_AXIS] };
 	}
 	StaticForcesConfig cfg;
 	cfg.ignoreGravity = ignoreGravity;
@@ -1457,262 +1417,14 @@ void HangprinterKinematics::StaticForces(float const machinePos[3], float F[HANG
 
 	StaticForcesResult result;
 	result.tensions = F;
-	Vec3 machine = { machinePos[X_AXIS], machinePos[Y_AXIS], machinePos[Z_AXIS] };
+	Vec3 mover = { machinePos[X_AXIS], machinePos[Y_AXIS], machinePos[Z_AXIS] };
 
 	if (flexAlgorithm == FlexAlgorithm::Tikhonov) {
-		StaticForcesEx(anchorVec.data(), (int)numAnchors, machine, cfg, result);
+		StaticForcesTikhonov(mover, anchorVecs, cfg, result);
 	} else {
-		StaticForcesEx_qp(anchorVec.data(), (int)numAnchors, machine, cfg, result);
-	}
-
-	for (size_t i = numAnchors; i < HANGPRINTER_MAX_ANCHORS; ++i) {
-		F[i] = 0.0F;
+		StaticForcesQp(mover, anchorVecs, cfg, result);
 	}
 }
-
-void HangprinterKinematics::StaticForcesQuadrilateralPyramid(float const machinePos[3], float F[HANGPRINTER_MAX_ANCHORS]) const noexcept {
-	// A QuadrilateralPyramid has 5 corners, there's one anchor in each.
-	// There are many 4's in this function because 4 motors (the lower ones, ABCD)
-	// are assumed to have unknown forces.
-	// The forces in the top anchor is assumed to be known and constant, except for gravity's
-	// effects who are also known.
-	if (moverWeight_kg < 0.0001) {
-		return;
-	}
-	// Space for four linear 3x3 systems, each with two solution columns,
-	FixedMatrix<float, 3, 5> M[4];
-
-	float norm[5];
-	norm[4] = hyp3(anchors[4], machinePos);
-	for (int i = 0; i < 4; ++i) {
-		norm[i] = hyp3(anchors[i], machinePos);
-		for (int j = 0; j < 3; ++j) {
-			for (int k = 0; k < 4; ++k) {
-				// Fill 3x3 top left corner of system with
-				// unit vectors toward each ABCD anchor from mover
-				// If A is the column vector pointing towards A-anchor, we're building these
-				// four matrices:
-				// k=0: [BCD], A-direction skipped
-				// k=1: [ACD], B-direction skipped
-				// k=2: [ABD], C-direction skipped
-				// k=3: [ABC], D-direction skipped
-				if ( k != i) {
-					if ( i > k ) {
-						M[k](j, i - 1) = (anchors[i][j] - machinePos[j]) / norm[i];
-					} else {
-						M[k](j, i) = (anchors[i][j] - machinePos[j]) / norm[i];
-					}
-				}
-			}
-		}
-	}
-	float const mg = moverWeight_kg * 9.81;
-
-	float top_mg = 0.0F;
-	float top_pre = 0.0F;
-
-	if (anchors[4][Z_AXIS] > machinePos[Z_AXIS]) {
-		// These force constants will go into the solution column that has to do with gravity
-		top_mg = mg / ((anchors[4][Z_AXIS] - machinePos[Z_AXIS]) / norm[4]);
-		top_pre = targetForce_Newton;
-	}
-
-	// Indices for the two solution columns
-	size_t const sol_mg = 3;
-	size_t const sol_pt = 4;
-	for (int i = 0; i < 3; ++i) {
-		float const top_dist = (anchors[4][i] - machinePos[i]) / norm[4];
-		for (int k = 0; k < 4; ++k) {
-			M[k](i, sol_mg) = -top_mg * top_dist;  // gravity solution column
-			M[k](i, sol_pt) = -top_pre * top_dist; // pretension solution column
-		}
-	}
-	for (int k = 0; k < 4; ++k) {
-		// Cancel out top anchor's Z-force with gravity.
-		M[k](Z_AXIS, sol_mg) += mg; // == 0
-	}
-
-	// Solve the four systems
-	for (int k = 0; k < 4; ++k) {
-		M[k].GaussJordan(3, 5);
-	}
-
-	// Weigh/scale the pre-tension solutions so all have equal max force.
-	float norm_ABCD[4];
-	for(size_t k{0}; k < 4; ++k) {
-		norm_ABCD[k] = fastSqrtf(M[k](0, sol_pt) * M[k](0, sol_pt) + M[k](1, sol_pt) * M[k](1, sol_pt) + M[k](2, sol_pt) * M[k](2, sol_pt));
-	}
-
-	// Arrays to hold our weighted combinations of the four (pairs of) solutions
-	float p[4] = { 0.0F, 0.0F, 0.0F, 0.0F };
-	float m[4] = { 0.0F, 0.0F, 0.0F, 0.0F };
-	for (size_t i{0}; i < 3; ++i) {
-		for (size_t j{0}; j < 4; ++j) {
-			float const pt_weight = targetForce_Newton / norm_ABCD[j];
-			// The gravity counter actions are scaled to exactly counter act gravity, and top-line forces neccesary to counter act gravity.
-			// So the resultant force of all four solutions is the same. Lets add a quarter of each solution to get back that resultant force.
-			float const mg_weight = 1.0/4.0;
-			// i can mean BCD, ACD, ABD, or ABC, depending on which matrix we're looking into
-			// Let's just translate that back into the solutions vectors
-			size_t const s = j <= i ? i + 1 : i;
-			p[s] += M[j](i, sol_pt)*pt_weight;
-			m[s] += M[j](i, sol_mg)*mg_weight;
-		}
-	}
-
-	// The pre-tension solution can be scaled up or down however we want.
-	// Forces in those solution cancel each other out exactly, so any multiple of the solution is also a valid solution.
-	//
-	// (The gravity solution can't be scaled since it has to exactly counter act top-line forces that must exactly counter act gravity (mg))
-	//
-	// Use the scaling freedom of the pre-tension solution to assure that we have at least targetForce_Newton in the ABCD lines,
-	// and that no line (incl top-line) get more tension than the configured maxPlannedForce in that direction.
-	float  preFac = min(max(std::abs((targetForce_Newton - m[3]) / p[3]),
-	                             max(std::abs((targetForce_Newton - m[2]) / p[2]),
-	                                 max(std::abs((targetForce_Newton - m[1]) / p[1]), std::abs((targetForce_Newton - m[0]) / p[0])))),
-	                         min(std::abs((maxPlannedForce_Newton[4] - top_mg) / top_pre),
-	                             min(min(std::abs((maxPlannedForce_Newton[0] - m[0]) / p[0]), std::abs((maxPlannedForce_Newton[1] - m[1]) / p[1])),
-	                                 min(std::abs((maxPlannedForce_Newton[2] - m[2]) / p[2]), std::abs((maxPlannedForce_Newton[3] - m[3]) / p[3])))));
-
-	float tot[5] = { 0.0F, 0.0F, 0.0F, 0.0F, 0.0F };
-	tot[0] = m[0] + preFac * p[0];
-	tot[1] = m[1] + preFac * p[1];
-	tot[2] = m[2] + preFac * p[2];
-	tot[3] = m[3] + preFac * p[3];
-	tot[4] = top_mg + preFac * top_pre;
-
-	for (size_t i{0}; i < 5; ++i) {
-		// Negative, or very large forces can still have slipped through the preFac filter.
-		// Truncate away such forces and assign to the output variable.
-		// Voila.
-		// The min( ... ) shouldn't be needed here. Just better safe than sorry.
-		F[i] = min(max(tot[i], minPlannedForce_Newton[i]), maxPlannedForce_Newton[i]);
-	}
-}
-
-
-void HangprinterKinematics::StaticForcesTetrahedron(float const machinePos[3], float F[HANGPRINTER_MAX_ANCHORS]) const noexcept {
-	static constexpr size_t A_AXIS = 0;
-	static constexpr size_t B_AXIS = 1;
-	static constexpr size_t C_AXIS = 2;
-	static constexpr size_t D_AXIS = 3;
-	static constexpr size_t FOUR_ANCH = 4;
-	static constexpr size_t CARTESIAN_AXES = 3;
-
-	if (moverWeight_kg > 0.0001) { // mover weight more than one gram
-		float norm[FOUR_ANCH]; // Unit vector directions toward each anchor from mover
-		FixedMatrix<float, CARTESIAN_AXES, FOUR_ANCH + 1> M;
-		for (size_t i = 0; i < FOUR_ANCH - 1; ++i) { // One anchor above mover
-			norm[i] = hyp3(anchors[i], machinePos);
-			for (size_t j = 0; j < CARTESIAN_AXES; ++j) {
-				M(j, i) = (anchors[i][j] - machinePos[j]) / norm[i];
-			}
-		}
-
-		float const mg = moverWeight_kg * 9.81; // Size of gravity force in Newtons
-		float D_mg = 0.0F;
-		float D_pre = 0.0F;
-
-		// The D-forces' z-component is always equal to mg + targetForce_Newton.
-		// The D-forces' z-component is always equal to mg +
-		// targetForce_Newton. This means ABC-motors combined pull
-		// downwards targetForce_Newton N. I don't know if that's always
-		// solvable. Still, my tests show that we get very reasonable
-		// flex compensation...
-
-		// Right hand side of the equation
-		// A + B + C + D + (0,0,-mg)' = 0
-		// <=> A + B + C = -D + (0,0,mg)'
-		//
-		// Mx = y,
-		//
-		// Where M is the matrix
-		//
-		//     ax bx cx
-		// M = ay by cy,
-		//     az bz cz
-		//
-		// and x is the sizes of the forces:
-		//
-		//     A
-		// x = B,
-		//     C
-		//
-		// and y is
-		//
-		//     -D*dx
-		// y = -D*dy     .
-		//     -D*dz + mg
-
-		float const normD = hyp3(anchors[D_AXIS], machinePos);
-		if (anchors[D_AXIS][Z_AXIS] > machinePos[Z_AXIS]) { // D anchor above machine
-			D_mg = mg / ((anchors[D_AXIS][2] - machinePos[2]) / normD);
-			D_pre = targetForce_Newton;
-		}
-
-		for (size_t i = 0; i < CARTESIAN_AXES; ++i) {
-			float const dist = (anchors[D_AXIS][i] - machinePos[i]) / normD;
-			M(i, FOUR_ANCH - 1) = -D_mg * dist;
-			M(i, FOUR_ANCH) = -D_pre * dist;
-		}
-		M(Z_AXIS, D_AXIS) += mg;
-
-		// Solve!
-		const bool ok = M.GaussJordan(CARTESIAN_AXES, 5);
-
-		if (ok) {
-			// Size of the undetermined forces
-			float const A_mg = M(0, 3);
-			float const B_mg = M(1, 3);
-			float const C_mg = M(2, 3);
-			float const A_pre = M(0, 4);
-			float const B_pre = M(1, 4);
-			float const C_pre = M(2, 4);
-
-			// Assure at least targetForce in the ABC lines (first argument to outer min()),
-			// and that no line get more than max planned force (second argument to outer min()).
-			float const preFac = min(max(std::abs((targetForce_Newton - C_mg) / C_pre),
-			                             max(std::abs((targetForce_Newton - B_mg) / B_pre), std::abs((targetForce_Newton - A_mg) / A_pre))),
-			                         min(min(std::abs((maxPlannedForce_Newton[A_AXIS] - A_mg) / A_pre), std::abs((maxPlannedForce_Newton[B_AXIS] - B_mg) / B_pre)),
-			                             min(std::abs((maxPlannedForce_Newton[C_AXIS] - C_mg) / C_pre), std::abs((maxPlannedForce_Newton[D_AXIS] - D_mg) / D_pre))));
-
-			float totalForces[FOUR_ANCH] = {
-				A_mg + preFac * A_pre,
-				B_mg + preFac * B_pre,
-				C_mg + preFac * C_pre,
-				D_mg + preFac * D_pre
-			};
-
-			for (size_t i = 0; i < FOUR_ANCH; ++i) {
-				F[i] = min(max(totalForces[i], minPlannedForce_Newton[i]), maxPlannedForce_Newton[i]);
-			}
-		}
-	}
-}
-
-namespace HangprinterFlex {
-constexpr int MaxAnchors = HangprinterKinematics::HANGPRINTER_MAX_ANCHORS;
-
-struct StaticForcesConfig {
-	bool ignoreGravity = false;
-	bool ignorePretension = false;
-	float massKg = 0.0f;
-	float g = 9.81f;
-	float lambda = 1e-3f;
-	float tol = 1e-3f;
-	float stepDamp = 0.75f;
-	int maxItersTarget = 100;
-	const float *Tmax = nullptr;
-	const float *Tmin = nullptr;
-};
-
-struct StaticForcesResult {
-	float *tensions = nullptr;
-	Vec3 achievedForce = {0.0f, 0.0f, 0.0f};
-	Vec3 requestedForce = {0.0f, 0.0f, 0.0f};
-	Vec3 residual = {0.0f, 0.0f, 0.0f};
-	float supportedGravityFrac = 0.0f;
-};
 
 static inline float dot(const Vec3 &a, const Vec3 &b) {
 	return a.x * b.x + a.y * b.y + a.z * b.z;
@@ -1723,7 +1435,7 @@ static inline Vec3 subtract(const Vec3 &a, const Vec3 &b) {
 }
 
 static inline float norm(const Vec3 &v) {
-	return std::sqrtf(dot(v, v));
+	return fastSqrtf(dot(v, v));
 }
 
 static inline Vec3 unit_or_zero(const Vec3 &v) {
@@ -1735,7 +1447,7 @@ static inline Vec3 unit_or_zero(const Vec3 &v) {
 	return {0.0f, 0.0f, 0.0f};
 }
 
-static inline void build_direction_matrix(const Vec3 anchors[], int N, const Vec3 &mover, float *A) {
+static inline void build_direction_matrix(const Vec3 &mover, const Vec3 anchors[], int N, float *A) {
 	for (int j = 0; j < N; ++j) {
 		Vec3 diff = subtract(anchors[j], mover);
 		const Vec3 unit = unit_or_zero(diff);
@@ -1793,7 +1505,7 @@ static inline void solve_min_norm_T(const float *A, int N, const Vec3 &Fext, flo
 		S[2][2] += az * az;
 	}
 
-	float Sinv[3][3];
+	float Sinv[3][3] = { 0.0f };
 	if (!invert3x3(S, Sinv)) {
 		S[0][0] += 1e-6f;
 		S[1][1] += 1e-6f;
@@ -1825,7 +1537,7 @@ static inline void build_null_projector(const float *A, int N, float lambda, flo
 		S[2][2] += az * az;
 	}
 
-	float Sinv[3][3];
+	float Sinv[3][3] = { 0.0f };
 	if (!invert3x3(S, Sinv)) {
 		S[0][0] += 1e-6f;
 		S[1][1] += 1e-6f;
@@ -1854,6 +1566,17 @@ static inline void proj_nullspace(const float *P, int N, const float *v, float *
 		}
 		out[r] = acc;
 	}
+}
+
+static inline Vec3 applyA(const float* A, int N, const float* T)
+{
+	float fx=0, fy=0, fz=0;
+	for (int j = 0; j < N; ++j){
+		fx += A[0*N + j]*T[j];
+		fy += A[1*N + j]*T[j];
+		fz += A[2*N + j]*T[j];
+	}
+	return Vec3{fx, fy, fz};
 }
 
 static inline bool chol_decompose(std::vector<double> &G, int k) {
@@ -2072,35 +1795,32 @@ static inline void solve_box_ridge_ls(const float *A, int N, const Vec3 &F, doub
 	}
 }
 
-void StaticForcesEx(
-	const Vec3 anchors[], int N,
+void HangprinterKinematics::StaticForcesTikhonov(
 	const Vec3 &mover,
+	const Vec3 anchors[],
 	const StaticForcesConfig &cfg,
-	StaticForcesResult &out)
+	StaticForcesResult &out) const noexcept
 {
-	if (N <= 0 || out.tensions == nullptr) {
-		return;
-	}
 	float *T = out.tensions;
-	float A[3 * MaxAnchors] = {0.0f};
-	build_direction_matrix(anchors, N, mover, A);
+	float A[3 * HANGPRINTER_MAX_ANCHORS] = {0.0f};
+	build_direction_matrix(mover, anchors, numAnchors, A);
 
 	out.requestedForce = {0.0f, 0.0f, 0.0f};
-	for (int i = 0; i < N; ++i) {
+	for (size_t i = 0; i < numAnchors; ++i) {
 		T[i] = 0.0f;
 	}
 
 	if (!cfg.ignoreGravity) {
 		out.requestedForce = {0.0f, 0.0f, cfg.massKg * cfg.g};
-		solve_min_norm_T(A, N, out.requestedForce, cfg.lambda, T);
+		solve_min_norm_T(A, numAnchors, out.requestedForce, cfg.lambda, T);
 	}
 
 	if (!cfg.ignorePretension) {
-		float P[MaxAnchors * MaxAnchors] = {0.0f};
-		build_null_projector(A, N, cfg.lambda, P);
+		float P[HANGPRINTER_MAX_ANCHORS * HANGPRINTER_MAX_ANCHORS] = {0.0f};
+		build_null_projector(A, numAnchors, cfg.lambda, P);
 		for (int it = 0; it < cfg.maxItersTarget; ++it) {
-			float gradient[MaxAnchors] = {0.0f};
-			for (int i = 0; i < N; ++i) {
+			float gradient[HANGPRINTER_MAX_ANCHORS] = {0.0f};
+			for (size_t i = 0; i < numAnchors; ++i) {
 				float target_grad = 0.1f * (T[i] - (cfg.Tmin ? cfg.Tmin[i] : 0.0f));
 				if (cfg.Tmax && T[i] > cfg.Tmax[i]) {
 					target_grad += T[i] - cfg.Tmax[i];
@@ -2110,20 +1830,20 @@ void StaticForcesEx(
 				}
 				gradient[i] = target_grad;
 			}
-			float d[MaxAnchors] = {0.0f};
-			proj_nullspace(P, N, gradient, d);
+			float d[HANGPRINTER_MAX_ANCHORS] = {0.0f};
+			proj_nullspace(P, numAnchors, gradient, d);
 			float dn = 0.0f;
-			for (int i = 0; i < N; ++i) {
+			for (size_t i = 0; i < numAnchors; ++i) {
 				dn += d[i] * d[i];
 			}
 			if (dn < cfg.tol * cfg.tol) {
 				break;
 			}
-			for (int i = 0; i < N; ++i) {
+			for (size_t i = 0; i < numAnchors; ++i) {
 				T[i] -= cfg.stepDamp * d[i];
 			}
 		}
-		for (int i = 0; i < N; ++i) {
+		for (size_t i = 0; i < numAnchors; ++i) {
 			if (T[i] < 0.0f) {
 				T[i] = 0.0f;
 			}
@@ -2136,7 +1856,7 @@ void StaticForcesEx(
 		}
 	}
 
-	out.achievedForce = applyA(A, N, T);
+	out.achievedForce = applyA(A, numAnchors, T);
 	out.residual = {
 		out.requestedForce.x - out.achievedForce.x,
 		out.requestedForce.y - out.achievedForce.y,
@@ -2148,26 +1868,23 @@ void StaticForcesEx(
 	}
 }
 
-void StaticForcesEx_qp(
-	const Vec3 anchors[], int N,
+void HangprinterKinematics::StaticForcesQp(
 	const Vec3 &mover,
+	const Vec3 anchors[],
 	const StaticForcesConfig &cfg,
-	StaticForcesResult &out)
+	StaticForcesResult &out) const noexcept
 {
-	if (N <= 0 || out.tensions == nullptr) {
-		return;
-	}
 	float *T = out.tensions;
-	float A[3 * MaxAnchors] = {0.0f};
-	build_direction_matrix(anchors, N, mover, A);
+	float A[3 * HANGPRINTER_MAX_ANCHORS] = {0.0f};
+	build_direction_matrix(mover, anchors, numAnchors, A);
 
 	out.requestedForce = {0.0f, 0.0f, 0.0f};
 	if (!cfg.ignoreGravity) {
 		out.requestedForce = {0.0f, 0.0f, cfg.massKg * cfg.g};
 	}
 
-	std::vector<double> L(N, 0.0), U(N, std::numeric_limits<double>::infinity());
-	for (int i = 0; i < N; ++i) {
+	std::vector<double> L(numAnchors, 0.0), U(numAnchors, std::numeric_limits<double>::infinity());
+	for (size_t i = 0; i < numAnchors; ++i) {
 		const double li = cfg.ignorePretension ? 0.0 : (cfg.Tmin ? cfg.Tmin[i] : 0.0);
 		double ui = (cfg.Tmax ? cfg.Tmax[i] : std::numeric_limits<double>::infinity());
 		if (ui < li) {
@@ -2177,14 +1894,14 @@ void StaticForcesEx_qp(
 		U[i] = ui;
 	}
 
-	std::vector<double> Td(N, 0.0);
-	solve_box_ridge_ls(A, N, out.requestedForce, cfg.lambda, L.data(), U.data(), cfg.maxItersTarget, cfg.tol, Td.data());
+	std::vector<double> Td(numAnchors, 0.0);
+	solve_box_ridge_ls(A, numAnchors, out.requestedForce, cfg.lambda, L.data(), U.data(), cfg.maxItersTarget, cfg.tol, Td.data());
 
-	for (int i = 0; i < N; ++i) {
+	for (size_t i = 0; i < numAnchors; ++i) {
 		T[i] = (float)Td[i];
 	}
 
-	out.achievedForce = applyA(A, N, Td.data());
+	out.achievedForce = applyA(A, numAnchors, T);
 	out.residual = {
 		out.requestedForce.x - out.achievedForce.x,
 		out.requestedForce.y - out.achievedForce.y,
@@ -2195,7 +1912,6 @@ void StaticForcesEx_qp(
 		out.supportedGravityFrac = out.achievedForce.z / out.requestedForce.z;
 	}
 }
-} // namespace HangprinterFlex
 
 #endif // SUPPORT_HANGPRINTER
 

@@ -12,6 +12,8 @@
 
 #if SUPPORT_HANGPRINTER
 
+struct Vec3 { float x; float y; float z; };
+
 // Different modes can be configured for different tradeoffs in terms of printing volumes and speeds
 enum class HangprinterAnchorMode {
 	None, // All is reacheable in None anchor mode as printing volume
@@ -129,8 +131,35 @@ private:
 
 	float SpringK(float const springLength) const noexcept;
 	void StaticForces(float const machinePos[3], float F[HANGPRINTER_MAX_ANCHORS]) const noexcept;
-	void StaticForcesTetrahedron(float const machinePos[3], float F[HANGPRINTER_MAX_ANCHORS]) const noexcept;
-	void StaticForcesQuadrilateralPyramid(float const machinePos[3], float F[HANGPRINTER_MAX_ANCHORS]) const noexcept;
+	struct StaticForcesConfig {
+		bool ignoreGravity = false;
+		bool ignorePretension = false;
+		float massKg = 0.0f;
+		float g = 9.81f;
+		float lambda = 1e-3f;
+		float tol = 1e-3f;
+		float stepDamp = 0.75f;
+		int maxItersTarget = 100;
+		const float *Tmax = nullptr;
+		const float *Tmin = nullptr;
+	};
+	struct StaticForcesResult {
+		float *tensions = nullptr;
+		Vec3 achievedForce = {0.0f, 0.0f, 0.0f};
+		Vec3 requestedForce = {0.0f, 0.0f, 0.0f};
+		Vec3 residual = {0.0f, 0.0f, 0.0f};
+		float supportedGravityFrac = 0.0f;
+	};
+	void StaticForcesTikhonov(
+		const Vec3 &mover,
+		const Vec3 anchors[],
+		const StaticForcesConfig &cfg,
+		StaticForcesResult &out) const noexcept;
+	void StaticForcesQp(
+		const Vec3 &mover,
+		const Vec3 anchors[],
+		const StaticForcesConfig &cfg,
+		StaticForcesResult &out) const noexcept;
 	void flexDistances(float const machinePos[3], float const distances[HANGPRINTER_MAX_ANCHORS],
 	                   float flex[HANGPRINTER_MAX_ANCHORS]) const noexcept;
 
