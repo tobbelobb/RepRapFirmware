@@ -1014,13 +1014,12 @@ void HangprinterKinematics::ApplyFlexPretension(const StringRef& reply) noexcept
 		desiredLinePos[i] = distances[i] - distancesOrigin[i] - flex[i];
 	}
 
-	reply.cat(" Flex pretension deltas:\n");
+	reply.cat(" Flex pretension deltas:");
 	for (size_t i = 0; i < numAnchors; ++i)
 	{
 		const int32_t currentMotorPos = reprap.GetMove().GetLiveMotorPosition(i);
 		const float currentLinePos = MotorPosToLinePos(currentMotorPos, i);
 		const float deltaLine = desiredLinePos[i] - currentLinePos;
-		//reply.catf(" distances[%c]=%.3f, distancesOrigin[%c]=%.3f, flex[%c]=%.3f, desiredLinePos[%c]=%.3f, currentLinePos=%.3f\n", ANCHOR_CHARS[i], (double)distances[i], ANCHOR_CHARS[i], (double)distancesOrigin[i], ANCHOR_CHARS[i], (double)flex[i], ANCHOR_CHARS[i], (double)desiredLinePos[i], currentLinePos);
 		float targetMotorPos;
 		if (useConstantSpoolModel[i])
 		{
