@@ -109,10 +109,9 @@ void HangprinterKinematics::Init() noexcept
 	constexpr uint32_t DefaultFullStepsPerMotorRev[HANGPRINTER_MAX_ANCHORS] = { 25, 25, 25, 25, 25};
 	constexpr float DefaultMoverWeight_kg = 0.0F;          // Zero disables flex compensation feature.
 	constexpr float DefaultSpringKPerUnitLength = 20000.0F; // Garda 1.1 is somewhere in the range [20000, 100000]
-	constexpr float DefaultMinPlannedForce_Newton[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
-	constexpr float DefaultMaxPlannedForce_Newton[HANGPRINTER_MAX_ANCHORS] = { 70.0F, 70.0F, 70.0F, 70.0F, 70.0F };
-	constexpr float DefaultGuyWireLengths[HANGPRINTER_MAX_ANCHORS] = { -1.0F }; // If one of these are negative they will be calculated in Recalc() instead
-	constexpr float DefaultTargetForce_Newton = 20.0F; // 20 chosen quite arbitrarily
+	constexpr float DefaultMinForce_Newton[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
+	constexpr float DefaultMaxForce_Newton[HANGPRINTER_MAX_ANCHORS] = { 70.0F, 70.0F, 70.0F, 70.0F, 70.0F };
+	constexpr float DefaultGuyWireLengths[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	constexpr float DefaultTorqueConstants[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 
 	ARRAY_INIT(anchors, DefaultAnchors);
@@ -128,10 +127,9 @@ void HangprinterKinematics::Init() noexcept
 	ARRAY_INIT(fullStepsPerMotorRev, DefaultFullStepsPerMotorRev);
 	moverWeight_kg = DefaultMoverWeight_kg;
 	springKPerUnitLength = DefaultSpringKPerUnitLength;
-	ARRAY_INIT(minPlannedForce_Newton, DefaultMinPlannedForce_Newton);
-	ARRAY_INIT(maxPlannedForce_Newton, DefaultMaxPlannedForce_Newton);
+	ARRAY_INIT(minForce_Newton, DefaultMinForce_Newton);
+	ARRAY_INIT(maxForce_Newton, DefaultMaxForce_Newton);
 	ARRAY_INIT(guyWireLengths, DefaultGuyWireLengths);
-	targetForce_Newton = DefaultTargetForce_Newton;
 	ARRAY_INIT(torqueConstants, DefaultTorqueConstants);
 
 	Recalc();
@@ -190,41 +188,6 @@ void HangprinterKinematics::Recalc() noexcept
 
 		// Calculate the steps per unit that is correct at the origin
 		move.SetDriveStepsPerMm(i, stepsPerMmThisAxis, 0);
-	}
-
-	//// Flex compensation
-	bool oneGuyWireNegative = false;
-	for (size_t i{0}; i < numAnchors; ++i) {
-		if (guyWireLengths[i] < 0.0F) {
-			oneGuyWireNegative = true;
-			break;
-		}
-	}
-
-	if (anchorMode == HangprinterAnchorMode::LastOnTop) {
-		// If no guy wire lengths are configured, assume a default configuration
-		// with all spools stationary located at the last anchor,
-		// and that the last anchor is a top anchor
-		if (oneGuyWireNegative) {
-			for (size_t i{0}; i < numAnchors - 1; ++i) {
-				guyWireLengths[i] = hyp3(anchors[i], anchors[numAnchors - 1]);
-			}
-			guyWireLengths[numAnchors - 1] = 0.0F;
-		}
-	} else {
-		// Assumes no guyWires in all other cases
-		for (size_t i{0}; i < numAnchors; ++i) {
-			guyWireLengths[i] = 0.0F;
-		}
-	}
-
-	for (size_t i{0}; i < numAnchors; ++i) {
-		springKsOrigin[i] = SpringK(distancesOrigin[i] * mechanicalAdvantage[i] + guyWireLengths[i]);
-	}
-	float constexpr origin[3] = { 0.0F, 0.0F, 0.0F };
-	StaticForces(origin, fOrigin);
-	for (size_t i{0}; i < numAnchors; ++i) {
-		relaxedSpringLengthsOrigin[i] = distancesOrigin[i] - fOrigin[i] / (springKsOrigin[i] * mechanicalAdvantage[i]);
 	}
 
 #if DUAL_CAN
@@ -290,8 +253,8 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 		gb.TryGetUIArray('J', numAnchors, fullStepsPerMotorRev, seen);
 		gb.TryGetFValue('W', moverWeight_kg, seen);
 		gb.TryGetFValue('S', springKPerUnitLength, seen);
-		gb.TryGetFloatArray('I', numAnchors, minPlannedForce_Newton, seen);
-		gb.TryGetFloatArray('X', numAnchors, maxPlannedForce_Newton, seen);
+		gb.TryGetFloatArray('I', numAnchors, minForce_Newton, seen);
+		gb.TryGetFloatArray('X', numAnchors, maxForce_Newton, seen);
 		gb.TryGetFloatArray('Y', numAnchors, guyWireLengths, seen);
 		gb.TryGetFloatArray('C', numAnchors, torqueConstants, seen);
 		int32_t flexCommand = 0;
@@ -327,20 +290,12 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 				seenFlexParam = false;
 			}
 		}
-		bool seenIgnoreGravity = false;
-		if (gb.TryGetBValue('B', ignoreGravity, seenIgnoreGravity))
-		{
-			seen = true;
-		}
-		bool seenIgnorePretension = false;
-		if (gb.TryGetBValue('P', ignorePretension, seenIgnorePretension))
-		{
-			seen = true;
-		}
+		gb.TryGetBValue('B', ignoreGravity, seen);
+		gb.TryGetBValue('P', ignorePretension, seen);
 		if (seen)
 		{
 			Recalc();
-			if (seenFlexParam && flexEnabled && !error)
+			if (seenFlexParam && !error)
 			{
 				ApplyFlexPretension(reply);
 			}
@@ -387,16 +342,16 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 			reply.lcatf("W%.2f\n", (double)moverWeight_kg);
 			reply.lcatf("S%.2f\n", (double)springKPerUnitLength);
 
-			reply.lcatf("I%.1f", (double)minPlannedForce_Newton[0]);
+			reply.lcatf("I%.1f", (double)minForce_Newton[0]);
 			for (size_t i = 1; i < numAnchors; ++i)
 			{
-				reply.catf(":%.1f", (double)minPlannedForce_Newton[i]);
+				reply.catf(":%.1f", (double)minForce_Newton[i]);
 			}
 
-			reply.lcatf("X%.1f", (double)maxPlannedForce_Newton[0]);
+			reply.lcatf("X%.1f", (double)maxForce_Newton[0]);
 			for (size_t i = 1; i < numAnchors; ++i)
 			{
-				reply.catf(":%.1f", (double)maxPlannedForce_Newton[i]);
+				reply.catf(":%.1f", (double)maxForce_Newton[i]);
 			}
 
 			reply.lcatf("Y%.1f", (double)guyWireLengths[0]);
@@ -404,7 +359,6 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 			{
 				reply.catf(":%.1f", (double)guyWireLengths[i]);
 			}
-			reply.lcatf("T%.1f\n", (double)targetForce_Newton);
 
 			reply.lcatf("C%.4f", (double)torqueConstants[0]);
 			for (size_t i = 1; i < numAnchors; ++i)
@@ -427,17 +381,29 @@ MovementError HangprinterKinematics::CartesianToMotorSteps(const float machinePo
 													size_t numVisibleAxes, size_t numTotalAxes, int32_t motorPos[], bool isCoordinated) const noexcept
 {
 	float distances[HANGPRINTER_MAX_ANCHORS];
-	for (size_t i = 0; i < numAnchors; ++i) {
+	for (size_t i = 0; i < numAnchors; ++i)
+  {
 		distances[i] = hyp3(machinePos, anchors[i]);
 	}
 
-	float flex[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
-	flexDistances(machinePos, distances, flex);
-
 	float linePos[HANGPRINTER_MAX_ANCHORS];
-	for (size_t i = 0; i < numAnchors; ++i) {
-		linePos[i] = distances[i] - flex[i];
-	}
+
+  if (flexEnabled)
+  {
+		float flex[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
+		flexDistances(machinePos, distances, flex);
+		for (size_t i = 0; i < numAnchors; ++i)
+    {
+			linePos[i] = distances[i] - distancesOrigin[i] - flex[i];
+		}
+  }
+  else
+  {
+		for (size_t i = 0; i < numAnchors; ++i)
+    {
+			linePos[i] = distances[i] - distancesOrigin[i];
+		}
+  }
 
 	MovementError rslt = MovementError::ok;
 	for (size_t i = 0; i < numAnchors; ++i)
@@ -739,18 +705,18 @@ bool HangprinterKinematics::WriteCalibrationParameters(FileStore *f) const noexc
 	ok = f->Write(scratchString.c_str());
 	if (!ok) return false;
 
-	scratchString.printf(" I%.1f", (double)minPlannedForce_Newton[0]);
+	scratchString.printf(" I%.1f", (double)minForce_Newton[0]);
 	for (size_t i = 1; i < numAnchors; ++i)
 	{
-		scratchString.catf(":%.1f", (double)minPlannedForce_Newton[i]);
+		scratchString.catf(":%.1f", (double)minForce_Newton[i]);
 	}
 	ok = f->Write(scratchString.c_str());
 	if (!ok) return false;
 
-	scratchString.printf(" X%.1f", (double)maxPlannedForce_Newton[0]);
+	scratchString.printf(" X%.1f", (double)maxForce_Newton[0]);
 	for (size_t i = 1; i < numAnchors; ++i)
 	{
-		scratchString.catf(":%.1f", (double)maxPlannedForce_Newton[i]);
+		scratchString.catf(":%.1f", (double)maxForce_Newton[i]);
 	}
 	ok = f->Write(scratchString.c_str());
 	if (!ok) return false;
@@ -760,10 +726,6 @@ bool HangprinterKinematics::WriteCalibrationParameters(FileStore *f) const noexc
 	{
 		scratchString.catf(":%.1f", (double)guyWireLengths[i]);
 	}
-	ok = f->Write(scratchString.c_str());
-	if (!ok) return false;
-
-	scratchString.printf(" T%.1f", (double)targetForce_Newton);
 	ok = f->Write(scratchString.c_str());
 	if (!ok) return false;
 
@@ -1028,12 +990,6 @@ void HangprinterKinematics::PrintParameters(const StringRef& reply) const noexce
 
 void HangprinterKinematics::ApplyFlexPretension(const StringRef& reply) noexcept
 {
-	if (!flexEnabled)
-	{
-		reply.cat(" Flex compensation disabled.\n");
-		return;
-	}
-
 	float machinePos[MaxAxes] = { 0.0F };
 	reprap.GetMove().GetCurrentMachinePosition(machinePos, 0);
 
@@ -1058,12 +1014,13 @@ void HangprinterKinematics::ApplyFlexPretension(const StringRef& reply) noexcept
 		desiredLinePos[i] = distances[i] - distancesOrigin[i] - flex[i];
 	}
 
-	reply.cat(" Flex pretension deltas:");
+	reply.cat(" Flex pretension deltas:\n");
 	for (size_t i = 0; i < numAnchors; ++i)
 	{
 		const int32_t currentMotorPos = reprap.GetMove().GetLiveMotorPosition(i);
 		const float currentLinePos = MotorPosToLinePos(currentMotorPos, i);
 		const float deltaLine = desiredLinePos[i] - currentLinePos;
+		//reply.catf(" distances[%c]=%.3f, distancesOrigin[%c]=%.3f, flex[%c]=%.3f, desiredLinePos[%c]=%.3f, currentLinePos=%.3f\n", ANCHOR_CHARS[i], (double)distances[i], ANCHOR_CHARS[i], (double)distancesOrigin[i], ANCHOR_CHARS[i], (double)flex[i], ANCHOR_CHARS[i], (double)desiredLinePos[i], currentLinePos);
 		float targetMotorPos;
 		if (useConstantSpoolModel[i])
 		{
@@ -1076,7 +1033,6 @@ void HangprinterKinematics::ApplyFlexPretension(const StringRef& reply) noexcept
 		const float deltaSteps = targetMotorPos - currentMotorPos;
 		reply.catf(" %cΔ%.4fmm/%.2f steps", ANCHOR_CHARS[i], (double)deltaLine, (double)deltaSteps);
 	}
-	reply.cat("\n");
 }
 
 #if DUAL_CAN
@@ -1390,14 +1346,6 @@ float HangprinterKinematics::SpringK(float const springLength) const noexcept {
 
 
 void HangprinterKinematics::StaticForces(float const machinePos[3], float F[HANGPRINTER_MAX_ANCHORS]) const noexcept {
-	if (!flexEnabled) {
-		for (size_t i = 0; i < HANGPRINTER_MAX_ANCHORS; ++i)
-		{
-			F[i] = 0.0F;
-		}
-		return;
-	}
-
 	// TODO: We don't want this Vec3 data type and we don't want to create a copy of the anchor data here
 	Vec3 anchorVecs[HANGPRINTER_MAX_ANCHORS] = { 0.0f };
 	for (size_t i = 0; i < numAnchors; ++i)
@@ -1412,8 +1360,8 @@ void HangprinterKinematics::StaticForces(float const machinePos[3], float F[HANG
 	cfg.tol = 1e-3f;
 	cfg.stepDamp = 0.75f;
 	cfg.maxItersTarget = 100;
-	cfg.Tmax = const_cast<float *>(maxPlannedForce_Newton);
-	cfg.Tmin = const_cast<float *>(minPlannedForce_Newton);
+	cfg.Tmax = const_cast<float *>(maxForce_Newton);
+	cfg.Tmin = const_cast<float *>(minForce_Newton);
 
 	StaticForcesResult result;
 	result.tensions = F;

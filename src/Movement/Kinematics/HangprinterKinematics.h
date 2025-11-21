@@ -106,10 +106,9 @@ private:
 	// Flex compensation configurables
 	float moverWeight_kg = 0.0F;
 	float springKPerUnitLength = 0.0F;
-	float minPlannedForce_Newton[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
-	float maxPlannedForce_Newton[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
+	float minForce_Newton[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
+	float maxForce_Newton[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	float guyWireLengths[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
-	float targetForce_Newton = 0.0F;
 	float torqueConstants[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 
 	FlexAlgorithm flexAlgorithm = FlexAlgorithm::Qp;
@@ -124,8 +123,6 @@ private:
 	float stepsPerMmAtOrigin[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	bool useConstantSpoolModel[HANGPRINTER_MAX_ANCHORS] = { false };
 	float distancesOrigin[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
-	float springKsOrigin[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
-	float relaxedSpringLengthsOrigin[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	float fOrigin[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	float printRadiusSquared = 0.0F;
 
