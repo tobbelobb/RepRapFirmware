@@ -107,7 +107,7 @@ void HangprinterKinematics::Init() noexcept
 	constexpr uint32_t DefaultMotorGearTeeth[HANGPRINTER_MAX_ANCHORS] = {  20,  20,  20,  20,  20}; // HP4 default
 	constexpr uint32_t DefaultSpoolGearTeeth[HANGPRINTER_MAX_ANCHORS] = { 255, 255, 255, 255, 255}; // HP4 default
 	constexpr uint32_t DefaultFullStepsPerMotorRev[HANGPRINTER_MAX_ANCHORS] = { 25, 25, 25, 25, 25};
-	constexpr float DefaultMoverWeight_kg = 0.0F;          // Zero disables flex compensation feature.
+	constexpr float DefaultMoverWeight_kg = 0.0F;
 	constexpr float DefaultSpringKPerUnitLength = 20000.0F; // Garda 1.1 is somewhere in the range [20000, 100000]
 	constexpr float DefaultMinForce_Newton[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	constexpr float DefaultMaxForce_Newton[HANGPRINTER_MAX_ANCHORS] = { 70.0F, 70.0F, 70.0F, 70.0F, 70.0F };
@@ -992,6 +992,7 @@ void HangprinterKinematics::ApplyFlexPretension(const StringRef& reply) noexcept
 {
 	float machinePos[MaxAxes] = { 0.0F };
 	reprap.GetMove().GetCurrentMachinePosition(machinePos, 0);
+	float desiredLinePos[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 
 	float distances[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	for (size_t i = 0; i < numAnchors; ++i)
@@ -999,20 +1000,29 @@ void HangprinterKinematics::ApplyFlexPretension(const StringRef& reply) noexcept
 		distances[i] = hyp3(machinePos, anchors[i]);
 	}
 
-	bool const ignoreGravityTmp = ignoreGravity;
-	bool const ignorePretensionTmp = ignorePretension;
-	ignoreGravity = true;
-	ignorePretension = false;
-	float flex[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
-	flexDistances(machinePos, distances, flex);
-	ignoreGravity = ignoreGravityTmp;
-	ignorePretension = ignorePretensionTmp;
+  if (flexEnabled)
+  {
+		bool const ignoreGravityTmp = ignoreGravity;
+		bool const ignorePretensionTmp = ignorePretension;
+		ignoreGravity = true;
+		ignorePretension = false;
+		float flex[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
+		flexDistances(machinePos, distances, flex);
+		ignoreGravity = ignoreGravityTmp;
+		ignorePretension = ignorePretensionTmp;
 
-	float desiredLinePos[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
-	for (size_t i = 0; i < numAnchors; ++i)
-	{
-		desiredLinePos[i] = distances[i] - distancesOrigin[i] - flex[i];
-	}
+		for (size_t i = 0; i < numAnchors; ++i)
+		{
+			desiredLinePos[i] = distances[i] - distancesOrigin[i] - flex[i];
+		}
+  }
+  else
+  {
+		for (size_t i = 0; i < numAnchors; ++i)
+		{
+			desiredLinePos[i] = distances[i] - distancesOrigin[i];
+		}
+  }
 
 	reply.cat(" Flex pretension deltas:");
 	for (size_t i = 0; i < numAnchors; ++i)
