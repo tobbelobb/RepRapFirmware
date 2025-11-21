@@ -209,8 +209,6 @@ public:
 	bool EvaluateValueForDisplay(const char *_ecv_array str, ExpressionValue& expr) const noexcept;
 #endif
 
-	bool QueueImmediateGCode(const char *_ecv_array cmd) noexcept;
-
 	void SetMappedFanSpeed(const GCodeBuffer *null gb, float f) noexcept;				// Set the speeds of fans mapped for the current tool
 	void HandleReply(GCodeBuffer& gb, GCodeResult rslt, const char *_ecv_array reply) noexcept;	// Handle G-Code replies
 	void EmergencyStop() noexcept;													// Cancel everything
@@ -498,7 +496,6 @@ private:
 	bool DoAsynchronousPause(GCodeBuffer& gb, PrintPausedReason reason, GCodeState newState) noexcept;	// Pause the print returning true if successful, false if we can't yet
 	void CheckForDeferredPause(GCodeBuffer& gb) noexcept;									// Check if a pause is pending, action it if so
 	void ProcessEvent(GCodeBuffer& gb) noexcept;											// Start processing a new event
-	void ProcessImmediateCommands() noexcept;
 
 #if HAS_VOLTAGE_MONITOR || HAS_SMART_DRIVERS
 	bool DoEmergencyPause() noexcept;														// Do an emergency pause following loss of power or a motor stall
@@ -659,10 +656,6 @@ private:
 	bool active;								// Live and running?
 	bool stopped;								// set after emergency stop has been executed
 	const char *_ecv_array null deferredPauseCommandPending;
-	static constexpr size_t ImmediateCommandLength = 96;
-	static constexpr size_t MaxImmediateCommands = 4;
-	String<ImmediateCommandLength> immediateCommandQueue[MaxImmediateCommands];
-	size_t numImmediateCommands = 0;
 	PauseState pauseState;						// whether the machine is running normally or is pausing, paused or resuming
 	bool runningConfigFile;						// We are running config.g during the startup process
 	bool doingToolChange;						// We are running tool change macros
@@ -885,42 +878,6 @@ inline void GCodes::GrabMovement(const GCodeBuffer& gb) noexcept
 }
 
 #endif
-
-inline bool GCodes::QueueImmediateGCode(const char *_ecv_array cmd) noexcept
-{
-	if (cmd == nullptr || cmd[0] == 0)
-	{
-		return true;
-	}
-	if (numImmediateCommands >= MaxImmediateCommands)
-	{
-		return false;
-	}
-	immediateCommandQueue[numImmediateCommands].copy(cmd);
-	++numImmediateCommands;
-	return true;
-}
-
-inline void GCodes::ProcessImmediateCommands() noexcept
-{
-	if (numImmediateCommands == 0)
-	{
-		return;
-	}
-	GCodeBuffer *const gb = AutoPauseGCode();
-	if (gb == nullptr || !gb->IsCompletelyIdle())
-	{
-		return;
-	}
-
-	gb->PutAndDecode(immediateCommandQueue[0].c_str());
-	for (size_t i = 1; i < numImmediateCommands; ++i)
-	{
-		immediateCommandQueue[i - 1] = immediateCommandQueue[i];
-	}
-	--numImmediateCommands;
-	(void)SpinGCodeBuffer(*gb);
-}
 
 //*****************************************************************************************************
 

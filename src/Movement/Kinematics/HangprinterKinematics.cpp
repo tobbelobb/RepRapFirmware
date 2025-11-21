@@ -204,6 +204,7 @@ void HangprinterKinematics::Recalc() noexcept
 bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const StringRef& reply, bool& error) THROWS(GCodeException) /*override*/
 {
 	bool seen = false;
+	bool requiresRehome = false;
 	if (mCode == 669)
 	{
 		const bool seenNonGeometry = TryConfigureSegmentation(gb);
@@ -225,6 +226,7 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 		if (seen)
 		{
 			Recalc();
+			requiresRehome = true;
 		}
 		else if (!seenNonGeometry && !gb.Seen('K'))
 		{
@@ -239,26 +241,69 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 	}
 	else if (mCode == 666)
 	{
+		bool geometryChanged = false;
 		bool seenFlexParam = false;
 		// 0=None, 1=last-top, 2=all-top, 3-half-top, etc
 		uint32_t unsignedAnchorMode = (uint32_t)anchorMode;
-		gb.TryGetUIValue('A', unsignedAnchorMode, seen);
-		if (unsignedAnchorMode <= (uint32_t)HangprinterAnchorMode::AllOnTop) {
-			anchorMode = (HangprinterAnchorMode)unsignedAnchorMode;
+		if (gb.TryGetUIValue('A', unsignedAnchorMode, seen))
+		{
+			geometryChanged = true;
+			if (unsignedAnchorMode <= (uint32_t)HangprinterAnchorMode::AllOnTop) {
+				anchorMode = (HangprinterAnchorMode)unsignedAnchorMode;
+			}
 		}
-		gb.TryGetFValue('Q', spoolBuildupFactor, seen);
-		gb.TryGetFloatArray('R', numAnchors, spoolRadii, seen);
-		gb.TryGetUIArray('U', numAnchors, mechanicalAdvantage, seen);
-		gb.TryGetUIArray('O', numAnchors, linesPerSpool, seen);
-		gb.TryGetUIArray('L', numAnchors, motorGearTeeth, seen);
-		gb.TryGetUIArray('H', numAnchors, spoolGearTeeth, seen);
-		gb.TryGetUIArray('J', numAnchors, fullStepsPerMotorRev, seen);
-		gb.TryGetFValue('W', moverWeight_kg, seen);
-		gb.TryGetFValue('S', springKPerUnitLength, seen);
-		gb.TryGetFloatArray('I', numAnchors, minForce_Newton, seen);
-		gb.TryGetFloatArray('X', numAnchors, maxForce_Newton, seen);
-		gb.TryGetFloatArray('Y', numAnchors, guyWireLengths, seen);
-		gb.TryGetFloatArray('C', numAnchors, torqueConstants, seen);
+		if (gb.TryGetFValue('Q', spoolBuildupFactor, seen))
+		{
+			geometryChanged = true;
+		}
+		if (gb.TryGetFloatArray('R', numAnchors, spoolRadii, seen))
+		{
+			geometryChanged = true;
+		}
+		if (gb.TryGetUIArray('U', numAnchors, mechanicalAdvantage, seen))
+		{
+			geometryChanged = true;
+		}
+		if (gb.TryGetUIArray('O', numAnchors, linesPerSpool, seen))
+		{
+			geometryChanged = true;
+		}
+		if (gb.TryGetUIArray('L', numAnchors, motorGearTeeth, seen))
+		{
+			geometryChanged = true;
+		}
+		if (gb.TryGetUIArray('H', numAnchors, spoolGearTeeth, seen))
+		{
+			geometryChanged = true;
+		}
+		if (gb.TryGetUIArray('J', numAnchors, fullStepsPerMotorRev, seen))
+		{
+			geometryChanged = true;
+		}
+		if (gb.TryGetFValue('W', moverWeight_kg, seen))
+		{
+			geometryChanged = true;
+		}
+		if (gb.TryGetFValue('S', springKPerUnitLength, seen))
+		{
+			geometryChanged = true;
+		}
+		if (gb.TryGetFloatArray('I', numAnchors, minForce_Newton, seen))
+		{
+			geometryChanged = true;
+		}
+		if (gb.TryGetFloatArray('X', numAnchors, maxForce_Newton, seen))
+		{
+			geometryChanged = true;
+		}
+		if (gb.TryGetFloatArray('Y', numAnchors, guyWireLengths, seen))
+		{
+			geometryChanged = true;
+		}
+		if (gb.TryGetFloatArray('C', numAnchors, torqueConstants, seen))
+		{
+			geometryChanged = true;
+		}
 		int32_t flexCommand = 0;
 		if (gb.TryGetIValue('F', flexCommand, seenFlexParam))
 		{
@@ -292,8 +337,14 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 				seenFlexParam = false;
 			}
 		}
-		gb.TryGetBValue('B', ignoreGravity, seen);
-		gb.TryGetBValue('P', ignorePretension, seen);
+		if (gb.TryGetBValue('B', ignoreGravity, seen))
+		{
+			geometryChanged = true;
+		}
+		if (gb.TryGetBValue('P', ignorePretension, seen))
+		{
+			geometryChanged = true;
+		}
 		if (seen)
 		{
 			Recalc();
@@ -370,12 +421,13 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 			const uint32_t flexValue = flexEnabled ? ((flexAlgorithm == FlexAlgorithm::Tikhonov) ? 2u : 1u) : 0u;
 			reply.lcatf("F%u B%u P%u", flexValue, ignoreGravity ? 1u : 0u, ignorePretension ? 1u : 0u);
 		}
+		requiresRehome = geometryChanged;
 	}
 	else
 	{
 		return Kinematics::Configure(mCode, gb, reply, error);
 	}
-	return seen;
+	return requiresRehome;
 }
 
 // Convert Cartesian coordinates to motor coordinates, returning true if successful
@@ -992,6 +1044,8 @@ void HangprinterKinematics::PrintParameters(const StringRef& reply) const noexce
 
 void HangprinterKinematics::ApplyFlexPretension(const StringRef& reply) noexcept
 {
+	GCodes& gCodes = reprap.GetGCodes();
+
 	float machinePos[MaxAxes] = { 0.0F };
 	reprap.GetMove().GetCurrentMachinePosition(machinePos, 0);
 	float desiredLinePos[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
@@ -1058,11 +1112,11 @@ void HangprinterKinematics::ApplyFlexPretension(const StringRef& reply) noexcept
 	}
 
 	constexpr float FlexPretensionFeedrateMmPerMin = 500.0F;
-	const char *_ecv_array const axisLetters = reprap.GetGCodes().GetAxisLetters();
+	const char *_ecv_array const axisLetters = gCodes.GetAxisLetters();
 	String<192> moveCmd;
 	moveCmd.copy("G1 H2");
 	moveCmd.catf(" F%.0f", (double)FlexPretensionFeedrateMmPerMin);
-	const size_t totalAxes = reprap.GetGCodes().GetTotalAxes();
+	const size_t totalAxes = gCodes.GetTotalAxes();
 	for (size_t i = 0; i < numAnchors && i < totalAxes; ++i)
 	{
 		const char axisLetter = axisLetters[i];
@@ -1072,11 +1126,28 @@ void HangprinterKinematics::ApplyFlexPretension(const StringRef& reply) noexcept
 		}
 	}
 
-	if (!reprap.GetGCodes().QueueImmediateGCode("G91")
-		|| !reprap.GetGCodes().QueueImmediateGCode(moveCmd.c_str())
-		|| !reprap.GetGCodes().QueueImmediateGCode("G90"))
+	GCodeBuffer *const macroGb = gCodes.GetGCodeBuffer(GCodeChannel::Autopause);
+	if (macroGb == nullptr)
 	{
-		reply.cat("Pretension move deferred because the immediate-command queue is full\n");
+		reply.cat("Pretension move cancelled because the autopause buffer is not available\n");
+		return;
+	}
+
+	if (!macroGb->IsCompletelyIdle())
+	{
+		reply.cat("Pretension move deferred because the autopause buffer is busy\n");
+		return;
+	}
+
+	const bool wasRelative = macroGb->LatestMachineState().axesRelative;
+	if (!wasRelative)
+	{
+		macroGb->PutAndDecode("G91");
+	}
+	macroGb->PutAndDecode(moveCmd.c_str());
+	if (!wasRelative)
+	{
+		macroGb->PutAndDecode("G90");
 	}
 }
 
