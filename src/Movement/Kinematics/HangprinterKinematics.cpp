@@ -1048,6 +1048,11 @@ void HangprinterKinematics::ApplyFlexPretension(const StringRef& reply) noexcept
 
 	float machinePos[MaxAxes] = { 0.0F };
 	reprap.GetMove().GetCurrentMachinePosition(machinePos, 0);
+	if (fabs(machinePos[0]) > 2.0f || fabs(machinePos[1]) > 2.0f || fabs(machinePos[2]) > 2.0f)
+	{
+		reply.catf("Can't apply flex pretension away from the origin:\n(%.3f, %.3f, %.3f)\n", machinePos[0], machinePos[1], machinePos[2]);
+		return;
+	}
 	float desiredLinePos[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	float lineDelta[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	bool hasMovement = false;
@@ -1058,29 +1063,29 @@ void HangprinterKinematics::ApplyFlexPretension(const StringRef& reply) noexcept
 		distances[i] = hyp3(machinePos, anchors[i]);
 	}
 
-  if (flexEnabled)
-  {
+	float flex[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
+	if (flexEnabled)
+	{
 		bool const ignoreGravityTmp = ignoreGravity;
 		bool const ignorePretensionTmp = ignorePretension;
 		ignoreGravity = true;
 		ignorePretension = false;
-		float flex[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 		flexDistances(machinePos, distances, flex);
 		ignoreGravity = ignoreGravityTmp;
 		ignorePretension = ignorePretensionTmp;
 
 		for (size_t i = 0; i < numAnchors; ++i)
 		{
-			desiredLinePos[i] = distances[i] - distancesOrigin[i] - flex[i];
+			desiredLinePos[i] = -flex[i];
 		}
-  }
-  else
-  {
+	}
+	else
+	{
 		for (size_t i = 0; i < numAnchors; ++i)
 		{
-			desiredLinePos[i] = distances[i] - distancesOrigin[i];
+			desiredLinePos[i] = 0.0f;
 		}
-  }
+	}
 
 	reply.cat(" Flex pretension deltas:");
 	for (size_t i = 0; i < numAnchors; ++i)
@@ -1103,6 +1108,7 @@ void HangprinterKinematics::ApplyFlexPretension(const StringRef& reply) noexcept
 			targetMotorPos = k0[i] * (fastSqrtf(spoolRadiiSq[i] + desiredLinePos[i] * k2[i]) - spoolRadii[i]);
 		}
 		const float deltaSteps = targetMotorPos - currentMotorPos;
+		//reply.catf(" distances[%c]=%.3f, distancesOrigin[%c]=%.3f, flex[%c]=%.3f, desiredLinePos[%c]=%.3f, currentLinePos=%.3f\n", ANCHOR_CHARS[i], (double)distances[i], ANCHOR_CHARS[i], (double)distancesOrigin[i], ANCHOR_CHARS[i], (double)flex[i], ANCHOR_CHARS[i], (double)desiredLinePos[i], currentLinePos);
 		reply.catf(" %cΔ%.4fmm/%.2f steps", ANCHOR_CHARS[i], (double)lineDelta[i], (double)deltaSteps);
 	}
 
@@ -1111,6 +1117,7 @@ void HangprinterKinematics::ApplyFlexPretension(const StringRef& reply) noexcept
 		return;
 	}
 
+  /*
 	constexpr float FlexPretensionFeedrateMmPerMin = 500.0F;
 	const char *_ecv_array const axisLetters = gCodes.GetAxisLetters();
 	String<192> moveCmd;
@@ -1149,6 +1156,7 @@ void HangprinterKinematics::ApplyFlexPretension(const StringRef& reply) noexcept
 	{
 		macroGb->PutAndDecode("G90");
 	}
+  */
 }
 
 #if DUAL_CAN
