@@ -27,7 +27,6 @@
 #include <General/Portability.h>
 #include <General/String.h>
 
-
 constexpr float DefaultAnchors[5][3] = {{    0.0, -2000.0, -100.0},
                                         { 2000.0,  1000.0, -100.0},
                                         {-2000.0,  1000.0, -100.0},
@@ -532,16 +531,6 @@ void HangprinterKinematics::MotorStepsToCartesian(const int32_t motorPos[], cons
 		distances[i] = MotorPosToLinePos(motorPos[i], i) + distancesOrigin[i];
 	};
 	ForwardTransform(distances, machinePos);
-
-	// Now we have an approximate machinePos
-	// Let's correct for line flex
-	float flex[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
-	flexDistances(machinePos, distances, flex);
-	float adjustedDistances[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
-	for (size_t i = 0; i < numAnchors; ++i) {
-		adjustedDistances[i] = distances[i] - flex[i];
-	}
-	ForwardTransform(adjustedDistances, machinePos);
 }
 
 static bool isSameSide(float const v0[3], float const v1[3], float const v2[3], float const v3[3], float const p[3]){
@@ -1067,17 +1056,10 @@ void HangprinterKinematics::PrintParameters(const StringRef& reply) const noexce
 void HangprinterKinematics::ApplyFlexPretension(GCodeBuffer& gb, const StringRef& reply) noexcept
 {
 	GCodes& gCodes = reprap.GetGCodes();
-	const auto markAxesHomed = [&gCodes]() noexcept
-	{
-		const size_t visibleAxes = gCodes.GetVisibleAxes();
-		for (size_t axis = 0; axis < visibleAxes; ++axis)
-		{
-			gCodes.SetAxisIsHomed(axis);
-		}
-	};
 
 	float machinePos[MaxAxes] = { 0.0F };
 	reprap.GetMove().GetCurrentMachinePosition(machinePos, 0);
+	//reply.catf("GetCurrentMachinePosition gives:\n(%.3f, %.3f, %.3f)\n", machinePos[0], machinePos[1], machinePos[2]);
 	if (fabs(machinePos[0]) > 2.0f || fabs(machinePos[1]) > 2.0f || fabs(machinePos[2]) > 2.0f)
 	{
 		reply.catf("Can't apply flex pretension away from the origin:\n(%.3f, %.3f, %.3f)\n", machinePos[0], machinePos[1], machinePos[2]);
@@ -1193,8 +1175,7 @@ void HangprinterKinematics::ApplyFlexPretension(GCodeBuffer& gb, const StringRef
 	{
 		(void)runInlineCommand("G90");
 	}
-
-	markAxesHomed();
+	(void)runInlineCommand("G92 X0 Y0 Z0");
 }
 
 #if DUAL_CAN
