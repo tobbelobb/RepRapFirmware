@@ -328,7 +328,7 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 			}
 		}
 		bool seenIgnoreGravity = false;
-		if (gb.TryGetBValue('G', ignoreGravity, seenIgnoreGravity))
+		if (gb.TryGetBValue('B', ignoreGravity, seenIgnoreGravity))
 		{
 			seen = true;
 		}
@@ -412,7 +412,7 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 				reply.catf(":%.4f", (double)torqueConstants[i]);
 			}
 			const uint32_t flexValue = flexEnabled ? ((flexAlgorithm == FlexAlgorithm::Tikhonov) ? 2u : 1u) : 0u;
-			reply.lcatf("F%u G%u P%u", flexValue, ignoreGravity ? 1u : 0u, ignorePretension ? 1u : 0u);
+			reply.lcatf("F%u B%u P%u", flexValue, ignoreGravity ? 1u : 0u, ignorePretension ? 1u : 0u);
 		}
 	}
 	else
