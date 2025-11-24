@@ -17,9 +17,7 @@
 
 #include <Platform/RepRap.h>
 #include <GCodes/GCodeBuffer/GCodeBuffer.h>
-#define private public
 #include <GCodes/GCodes.h>
-#undef private
 #include <Movement/Move.h>
 #include <CAN/CanInterface.h>
 #include <Math/Matrix.h>
@@ -245,7 +243,6 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 		bool seen = false;
 		bool anyParamSeen = false;
 		bool geometryChanged = false;
-		bool runPretension = false;
 		bool seenFlexParam = false;
 		// 0=None, 1=last-top, 2=all-top, 3-half-top, etc
 		uint32_t unsignedAnchorMode = (uint32_t)anchorMode;
@@ -349,7 +346,6 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 			if (validFlex)
 			{
 				anyParamSeen = true;
-				runPretension = true;
 			}
 			else
 			{
@@ -369,10 +365,6 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 		if (anyParamSeen)
 		{
 			Recalc();
-			if (runPretension && !error)
-			{
-				ApplyFlexPretension(gb, reply);
-			}
 		}
 		else
 		{
@@ -1051,131 +1043,6 @@ void HangprinterKinematics::PrintParameters(const StringRef& reply) const noexce
 		reply.catf(" (%.2f,%.2f,%.2f)", (double)anchors[i][X_AXIS], (double)anchors[i][Y_AXIS], (double)anchors[i][Z_AXIS]);
 	}
 	reply.cat("\n");
-}
-
-void HangprinterKinematics::ApplyFlexPretension(GCodeBuffer& gb, const StringRef& reply) noexcept
-{
-	GCodes& gCodes = reprap.GetGCodes();
-
-	float machinePos[MaxAxes] = { 0.0F };
-	reprap.GetMove().GetCurrentMachinePosition(machinePos, 0);
-	//reply.catf("GetCurrentMachinePosition gives:\n(%.3f, %.3f, %.3f)\n", machinePos[0], machinePos[1], machinePos[2]);
-	if (fabs(machinePos[0]) > 2.0f || fabs(machinePos[1]) > 2.0f || fabs(machinePos[2]) > 2.0f)
-	{
-		reply.catf("Can't apply flex pretension away from the origin:\n(%.3f, %.3f, %.3f)\n", machinePos[0], machinePos[1], machinePos[2]);
-		return;
-	}
-	float desiredLinePos[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
-	float lineDelta[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
-	bool hasMovement = false;
-
-	float distances[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
-	for (size_t i = 0; i < numAnchors; ++i)
-	{
-		distances[i] = hyp3(machinePos, anchors[i]);
-	}
-
-	float flex[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
-	if (flexEnabled)
-	{
-		const bool ignoreGravityTmp = ignoreGravity;
-		const bool ignorePretensionTmp = ignorePretension;
-		ignoreGravity = true;
-		ignorePretension = false;
-		flexDistances(machinePos, distances, flex);
-		ignoreGravity = ignoreGravityTmp;
-		ignorePretension = ignorePretensionTmp;
-
-		for (size_t i = 0; i < numAnchors; ++i)
-		{
-			desiredLinePos[i] = -flex[i];
-		}
-	}
-	else
-	{
-		for (size_t i = 0; i < numAnchors; ++i)
-		{
-			desiredLinePos[i] = 0.0f;
-		}
-	}
-
-	reply.cat(" Flex pretension deltas:");
-	for (size_t i = 0; i < numAnchors; ++i)
-	{
-		const int32_t currentMotorPos = reprap.GetMove().GetLiveMotorPosition(i);
-		const float currentLinePos = MotorPosToLinePos(currentMotorPos, i);
-		const float deltaLine = desiredLinePos[i] - currentLinePos;
-		lineDelta[i] = deltaLine;
-		if (fabsf(deltaLine) > 1.0e-6F)
-		{
-			hasMovement = true;
-		}
-		float targetMotorPos;
-		if (useConstantSpoolModel[i])
-		{
-			targetMotorPos = desiredLinePos[i] * stepsPerMmAtOrigin[i];
-		}
-		else
-		{
-			targetMotorPos = k0[i] * (fastSqrtf(spoolRadiiSq[i] + desiredLinePos[i] * k2[i]) - spoolRadii[i]);
-		}
-		const float deltaSteps = targetMotorPos - currentMotorPos;
-		//reply.catf(" distances[%c]=%.3f, distancesOrigin[%c]=%.3f, flex[%c]=%.3f, desiredLinePos[%c]=%.3f, currentLinePos=%.3f\n", ANCHOR_CHARS[i], (double)distances[i], ANCHOR_CHARS[i], (double)distancesOrigin[i], ANCHOR_CHARS[i], (double)flex[i], ANCHOR_CHARS[i], (double)desiredLinePos[i], currentLinePos);
-		reply.catf(" %cΔ%.4fmm/%.2f steps", ANCHOR_CHARS[i], (double)lineDelta[i], (double)deltaSteps);
-	}
-
-	if (!hasMovement)
-	{
-		return;
-	}
-
-	constexpr float FlexPretensionFeedrateMmPerMin = 500.0F;
-	const char *_ecv_array const axisLetters = gCodes.GetAxisLetters();
-	String<192> moveCmd;
-	moveCmd.copy("G1 H2");
-	moveCmd.catf(" F%.0f", (double)FlexPretensionFeedrateMmPerMin);
-	const size_t totalAxes = gCodes.GetTotalAxes();
-	for (size_t i = 0; i < numAnchors && i < totalAxes; ++i)
-	{
-		const char axisLetter = axisLetters[i];
-		if (axisLetter != 0)
-		{
-			moveCmd.catf(" %c%.4f", axisLetter, (double)lineDelta[i]);
-		}
-	}
-
-	const auto runInlineCommand = [&gb, &gCodes, &reply](const char *_ecv_array cmd) noexcept
-	{
-		if (!gb.PushState(true))
-		{
-			reply.cat("Pretension move deferred (stack overflow)\n");
-			return false;
-		}
-		gb.Init();
-		gb.PutAndDecode(cmd);
-		(void)gCodes.ActOnCode(gb, reply);
-		(void)gb.PopState(true);
-		return true;
-	};
-
-	const bool wasRelative = gb.LatestMachineState().axesRelative;
-	if (!wasRelative && !runInlineCommand("G91"))
-	{
-		return;
-	}
-	if (!runInlineCommand(moveCmd.c_str()))
-	{
-		if (!wasRelative)
-		{
-			(void)runInlineCommand("G90");
-		}
-		return;
-	}
-	if (!wasRelative)
-	{
-		(void)runInlineCommand("G90");
-	}
-	(void)runInlineCommand("G92 X0 Y0 Z0");
 }
 
 #if DUAL_CAN
