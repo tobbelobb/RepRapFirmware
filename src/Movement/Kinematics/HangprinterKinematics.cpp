@@ -518,11 +518,11 @@ void HangprinterKinematics::flexDistances(float const machinePos[3], float const
 // Assumes lines are tight and anchor location norms are followed
 void HangprinterKinematics::MotorStepsToCartesian(const int32_t motorPos[], const float stepsPerMm[], size_t numVisibleAxes, size_t numTotalAxes, float machinePos[]) const noexcept
 {
-	float distances[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
+	float lengths[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	for (size_t i = 0; i < numAnchors; ++i) {
-		distances[i] = MotorPosToLinePos(motorPos[i], i) + distancesOrigin[i];
+		lengths[i] = MotorPosToLinePos(motorPos[i], i) + distancesOrigin[i];
 	};
-	ForwardTransform(distances, machinePos);
+	ForwardTransform(lengths, machinePos);
 }
 
 static bool isSameSide(float const v0[3], float const v1[3], float const v2[3], float const v3[3], float const p[3]){
@@ -810,229 +810,268 @@ bool HangprinterKinematics::WriteResumeSettings(FileStore *f) const noexcept
 #endif
 
 
-void HangprinterKinematics::ForwardTransform(float const distances[HANGPRINTER_MAX_ANCHORS], float machinePos[3]) const noexcept {
-	switch (anchorMode) {
-		case HangprinterAnchorMode::LastOnTop:
-			if (numAnchors == 4) {
-				ForwardTransformTetrahedron(distances, machinePos);
-				return;
-			} else if (numAnchors == 5) {
-				ForwardTransformQuadrilateralPyramid(distances, machinePos);
-				return;
-			}
-			// Intentional fall-through to next case if no forward transform
-			[[fallthrough]];
-		case HangprinterAnchorMode::None:
-		case HangprinterAnchorMode::AllOnTop:
-		default:
-			return;
-	}
-}
-
-/**
- * Hangprinter forward kinematics tetrahedron case (three low anchors, one high)
- * Basic idea is to subtract squared line lengths to get linear equations,
- * and then to solve with variable substitution.
- *
- * If we assume (enforce by rotations) that anchor location norms are followed
- * Ax=0 Dx=0 Dy=0
- * then
- * we get a fairly clean derivation by
- * subtracting d*d from a*a, b*b, and c*c:
- *
- *  a*a - d*d = k1        +  k2*y +  k3*z     <---- a line  (I)
- *  b*b - d*d = k4 + k5*x +  k6*y +  k7*z     <---- a plane (II)
- *  c*c - d*d = k8 + k9*x + k10*y + k11*z     <---- a plane (III)
- *
- * Use (I) to reduce (II) and (III) into lines. Eliminate y, keep z.
- *
- *  (II):  b*b - d*d = k12 + k13*x + k14*z
- *  <=>            x = k0b + k1b*z,           <---- a line  (IV)
- *
- *  (III): c*c - d*d = k15 + k16*x + k17*z
- *  <=>            x = k0c + k1c*z,           <---- a line  (V)
- *
- * where k1, k2, ..., k17, k0b, k0c, k1b, and k1c are known constants.
- *
- * These two straight lines are not parallel, so they will cross in exactly one point.
- * Find z by setting (IV) = (V)
- * Find x by inserting z into (V)
- * Find y by inserting z into (I)
- *
- * Warning: truncation errors will typically be in the order of a few tens of microns.
- */
-void HangprinterKinematics::ForwardTransformTetrahedron(float const distances[HANGPRINTER_MAX_ANCHORS], float machinePos[3]) const noexcept
+namespace
 {
-	// Force the anchor location norms Ax=0, Dx=0, Dy=0
-	// through a series of rotations.
-	static constexpr size_t A_AXIS = 0;
-	static constexpr size_t B_AXIS = 1;
-	static constexpr size_t C_AXIS = 2;
-	static constexpr size_t D_AXIS = 3;
-	float const x_angle = atanf(anchors[D_AXIS][Y_AXIS]/anchors[D_AXIS][Z_AXIS]);
-	float const rxt[3][3] = {{1, 0, 0}, {0, cosf(x_angle), sinf(x_angle)}, {0, -sinf(x_angle), cosf(x_angle)}};
-	float anchors_tmp0[4][3] = { 0 };
-	for (size_t row{0}; row < 4; ++row) {
-		for (size_t col{0}; col < 3; ++col) {
-			anchors_tmp0[row][col] = rxt[0][col]*anchors[row][0] + rxt[1][col]*anchors[row][1] + rxt[2][col]*anchors[row][2];
+	struct SolverResult {
+		Vec3 pos{0.0F, 0.0F, 0.0F};
+		bool converged{false};
+		size_t iterations{0};
+		float cost{std::numeric_limits<float>::infinity()};
+	};
+
+	using Hessian3 = std::array<std::array<float, 3>, 3>;
+
+	static inline Vec3 VecAdd(const Vec3 &a, const Vec3 &b) noexcept
+	{
+		return {a.x + b.x, a.y + b.y, a.z + b.z};
+	}
+
+	static inline Vec3 VecScale(const Vec3 &a, float s) noexcept
+	{
+		return {a.x * s, a.y * s, a.z * s};
+	}
+
+	static inline float VecNorm(const Vec3 &v) noexcept
+	{
+		return fastSqrtf(fsquare(v.x) + fsquare(v.y) + fsquare(v.z));
+	}
+
+	static float ResidualsAndDerivatives(const std::vector<Vec3> &anchors, const std::vector<float> &lengths,
+										const Vec3 &pos, std::vector<float> &residuals, std::vector<Vec3> &jacobian,
+										std::vector<Hessian3> *hessians) noexcept
+	{
+		const size_t m = anchors.size();
+		residuals.resize(m);
+		jacobian.resize(m);
+		if (hessians != nullptr)
+		{
+			hessians->assign(m, Hessian3());
 		}
-	}
-	float const y_angle = atanf(-anchors_tmp0[D_AXIS][X_AXIS]/anchors_tmp0[D_AXIS][Z_AXIS]);
-	float const ryt[3][3] = {{cosf(y_angle), 0, -sinf(y_angle)}, {0, 1, 0}, {sinf(y_angle), 0, cosf(y_angle)}};
-	float anchors_tmp1[4][3] = { 0 };
-	for (size_t row{0}; row < 4; ++row) {
-		for (size_t col{0}; col < 3; ++col) {
-			anchors_tmp1[row][col] = ryt[0][col]*anchors_tmp0[row][0] + ryt[1][col]*anchors_tmp0[row][1] + ryt[2][col]*anchors_tmp0[row][2];
-		}
-	}
-	float const z_angle = atanf(anchors_tmp1[A_AXIS][X_AXIS]/anchors_tmp1[A_AXIS][Y_AXIS]);
-	float const rzt[3][3] = {{cosf(z_angle), sinf(z_angle), 0}, {-sinf(z_angle), cosf(z_angle), 0}, {0, 0, 1}};
-	for (size_t row{0}; row < 4; ++row) {
-		for (size_t col{0}; col < 3; ++col) {
-			anchors_tmp0[row][col] = rzt[0][col]*anchors_tmp1[row][0] + rzt[1][col]*anchors_tmp1[row][1] + rzt[2][col]*anchors_tmp1[row][2];
-		}
-	}
 
-	const float Asq = fsquare(distancesOrigin[A_AXIS]);
-	const float Bsq = fsquare(distancesOrigin[B_AXIS]);
-	const float Csq = fsquare(distancesOrigin[C_AXIS]);
-	const float Dsq = fsquare(distancesOrigin[D_AXIS]);
-	const float aa = fsquare(distances[A_AXIS]);
-	const float dd = fsquare(distances[D_AXIS]);
-	const float k0b = (-fsquare(distances[B_AXIS]) + Bsq - Dsq + dd) / (2.0 * anchors_tmp0[B_AXIS][X_AXIS]) + (anchors_tmp0[B_AXIS][Y_AXIS] / (2.0 * anchors_tmp0[A_AXIS][Y_AXIS] * anchors_tmp0[B_AXIS][X_AXIS])) * (Dsq - Asq + aa - dd);
-	const float k0c = (-fsquare(distances[C_AXIS]) + Csq - Dsq + dd) / (2.0 * anchors_tmp0[C_AXIS][X_AXIS]) + (anchors_tmp0[C_AXIS][Y_AXIS] / (2.0 * anchors_tmp0[A_AXIS][Y_AXIS] * anchors_tmp0[C_AXIS][X_AXIS])) * (Dsq - Asq + aa - dd);
-	const float k1b = (anchors_tmp0[B_AXIS][Y_AXIS] * (anchors_tmp0[A_AXIS][Z_AXIS] - anchors_tmp0[D_AXIS][Z_AXIS])) / (anchors_tmp0[A_AXIS][Y_AXIS] * anchors_tmp0[B_AXIS][X_AXIS]) + (anchors_tmp0[D_AXIS][Z_AXIS] - anchors_tmp0[B_AXIS][Z_AXIS]) / anchors_tmp0[B_AXIS][X_AXIS];
-	const float k1c = (anchors_tmp0[C_AXIS][Y_AXIS] * (anchors_tmp0[A_AXIS][Z_AXIS] - anchors_tmp0[D_AXIS][Z_AXIS])) / (anchors_tmp0[A_AXIS][Y_AXIS] * anchors_tmp0[C_AXIS][X_AXIS]) + (anchors_tmp0[D_AXIS][Z_AXIS] - anchors_tmp0[C_AXIS][Z_AXIS]) / anchors_tmp0[C_AXIS][X_AXIS];
-
-	float machinePos_tmp0[3];
-	machinePos_tmp0[Z_AXIS] = (k0b - k0c) / (k1c - k1b);
-	machinePos_tmp0[X_AXIS] = k0c + k1c * machinePos_tmp0[Z_AXIS];
-	machinePos_tmp0[Y_AXIS] = (Asq - Dsq - aa + dd) / (2.0 * anchors_tmp0[A_AXIS][Y_AXIS]) + ((anchors_tmp0[D_AXIS][Z_AXIS] - anchors_tmp0[A_AXIS][Z_AXIS]) / anchors_tmp0[A_AXIS][Y_AXIS]) * machinePos_tmp0[Z_AXIS];
-
-	//// Rotate machinePos_tmp back to original coordinate system
-	float machinePos_tmp1[3];
-	for (size_t row{0}; row < 3; ++row) {
-		machinePos_tmp1[row] = rzt[row][0]*machinePos_tmp0[0] + rzt[row][1]*machinePos_tmp0[1] + rzt[row][2]*machinePos_tmp0[2];
-	}
-	for (size_t row{0}; row < 3; ++row) {
-		machinePos_tmp0[row] = ryt[row][0]*machinePos_tmp1[0] + ryt[row][1]*machinePos_tmp1[1] + ryt[row][2]*machinePos_tmp1[2];
-	}
-	for (size_t row{0}; row < 3; ++row) {
-		machinePos[row] = rxt[row][0]*machinePos_tmp0[0] + rxt[row][1]*machinePos_tmp0[1] + rxt[row][2]*machinePos_tmp0[2];
-	}
-}
-
-static inline bool det(FixedMatrix<float, 3, 4> M){
-  return M(0, 0) * (M(1, 1) * M(2, 2) - M(1, 2) * M(2, 1)) + M(0, 1) * (M(1, 2) * M(2, 0) - M(2, 2) * M(1, 0)) + M(0, 2) * (M(1, 0) * M(2, 1) - M(1, 1) * M(2, 0));
-}
-
-static inline bool singular_3x3(FixedMatrix<float, 3, 4> M){
-  float const threshold = 1e-1;
-  return fabsf(det(M)) < threshold;
-}
-
-
-/* A quadrilateral pyramid has five anchors: four low and one high.
- * Our input variable `distances` contain the distance (L2-norm, euclidian distance) from each corner
- * to some point that is encapsulated by the five anchors.
- * We want to determine the xyz-coordinates of that point.
- *
- * Since this gives us 5 known variables and 3 unknown, this is an overdetermined system,
- * and we're not guaranteed that the 5 known variables define one exact point in space.
- * The `distance` values have been calculated from motors' rotational positions, and they don't
- * know if lines are slack or over tight, and much less which lines are slack and which are not in that case.
- * The `distance` values will generally be slightly off, and define a region in which we might wiggle, instead of a point.
- *
- * We approach this by solving four linear systems and averaging over the result,
- * which corresponds to all lines being ca equally slack.
- *
- * To get the four linear systems, we start with five non-linear ones.
- * |A - p| = l_a
- * |B - p| = l_b
- * |C - p| = l_c
- * |D - p| = l_d
- * |I - p| = l_i,
- *
- * where p is our unknown (x, y, z), A is the xyz of our A-anchor, and I is the top anchor.
- *
- * Square both sides and move |A|² to the right hand side:
- *
- * -2*A*p  + |p|² = l_a² - |A|²
- *
- * Now subtract the last equation to get rid of |p|² (we expect the last equality to always hold, vertical lines are never slack).
- *
- * -2*A*p  - 2*I*p = l_a² - l_i² - (|A|² - |I|²)
- *
- * Divide by -2 and simplify to get four linear equations
- *
- * (A - I)*p  = -(l_a² - l_i² - (|A|² - |I|²))/2 = k_a
- * (B - I)*p  = -(l_b² - l_i² - (|B|² - |I|²))/2 = k_b
- * (C - I)*p  = -(l_c² - l_i² - (|C|² - |I|²))/2 = k_c
- * (D - I)*p  = -(l_d² - l_i² - (|D|² - |I|²))/2 = k_d
- *
- * Say A' = A - I, and we get
- *
- * A'x A'y A'z | p_x   k_a
- * B'x B'y B'z | p_y = k_b
- * C'x C'y C'z | p_z   k_c
- * D'x D'y D'z |       k_d
- *
- * This is a linear but still overdetermined system (4x3). Skip each row in turn to obtain four different 3x3 matrices, and four different solution vectors k.
- * Solve each by GaussJordan elminiation and average over the result.
- * Voila.
- */
-void HangprinterKinematics::ForwardTransformQuadrilateralPyramid(float const distances[HANGPRINTER_MAX_ANCHORS], float machinePos[3]) const noexcept {
-	float anch_prim[4][3]{{0.0}};
-	float distancesOriginSq[5]{0.0};
-	float distancesSq[5]{0.0};
-	float k[4]{0.0};
-	FixedMatrix<float, 3, 4> M[4];
-	float machinePos_tmp[3]{0.0};
-
-	for (size_t i{0}; i < 4; ++i) {
-		for (size_t j{0}; j < 3; ++j) {
-			anch_prim[i][j] = anchors[i][j] - anchors[4][j];
-		}
-	}
-
-	for (size_t i{0}; i < 5; ++i) {
-		distancesOriginSq[i] = fsquare(distancesOrigin[i]);
-		distancesSq[i] = fsquare(distances[i]);
-	}
-
-	for (size_t i{0}; i < 4; ++i) {
-		k[i] = ((distancesOriginSq[i] - distancesOriginSq[4]) - (distancesSq[i] - distancesSq[4])) / 2.0;
-	}
-
-	for (size_t matrix_num{0}; matrix_num < 4; matrix_num++){
-		for (size_t row{0}; row < 3; ++row) {
-			size_t r = (row + matrix_num) % 4;
-			for (size_t col{0}; col < 3; ++col) {
-				M[matrix_num](row, col) = anch_prim[r][col];
+		float cost = 0.0F;
+		for (size_t i = 0; i < m; ++i)
+		{
+			const Vec3 diff{pos.x - anchors[i].x, pos.y - anchors[i].y, pos.z - anchors[i].z};
+			float len = VecNorm(diff);
+			if (len < 1.0e-6F)
+			{
+				len = 1.0e-6F;
 			}
-			M[matrix_num](row, 3) = k[r];
+			const float invLen = 1.0F / len;
+			const float invLen3 = invLen * invLen * invLen;
+
+			residuals[i] = len - lengths[i];
+			jacobian[i] = VecScale(diff, invLen);
+
+			if (hessians != nullptr)
+			{
+				Hessian3 H{};
+				const float diffArr[3] = {diff.x, diff.y, diff.z};
+				for (size_t r = 0; r < 3; ++r)
+				{
+					for (size_t c = 0; c < 3; ++c)
+					{
+						const float id = (r == c) ? invLen : 0.0F;
+						H[r][c] = id - diffArr[r] * diffArr[c] * invLen3;
+					}
+				}
+				(*hessians)[i] = H;
+			}
+
+			cost += 0.5F * residuals[i] * residuals[i];
 		}
+
+		return cost;
 	}
 
-	// Solve the four systems
-	size_t used{0};
-	for (int k = 0; k < 4; ++k) {
-		if (not singular_3x3(M[k])) {
-			used++;
-			M[k].GaussJordan(3, 4);
-			for (size_t i{0}; i < 3; ++i) {
-				machinePos_tmp[i] += M[k](i, 3);
+	static void AccumulateJtJandGrad(const std::vector<Vec3> &J, const std::vector<float> &residuals,
+									float JTJ[3][3], float grad[3]) noexcept
+	{
+		for (size_t i = 0; i < 3; ++i)
+		{
+			grad[i] = 0.0F;
+			for (size_t j = 0; j < 3; ++j)
+			{
+				JTJ[i][j] = 0.0F;
 			}
 		}
-	}
-	if (used != 0) {
-		for (size_t i{0}; i < 3; ++i) {
-			machinePos[i] = machinePos_tmp[i]/static_cast<float>(used);
+
+		for (size_t i = 0; i < J.size(); ++i)
+		{
+			const float jx = J[i].x;
+			const float jy = J[i].y;
+			const float jz = J[i].z;
+			const float res = residuals[i];
+
+			grad[0] += jx * res;
+			grad[1] += jy * res;
+			grad[2] += jz * res;
+
+			JTJ[0][0] += jx * jx;
+			JTJ[0][1] += jx * jy;
+			JTJ[0][2] += jx * jz;
+			JTJ[1][0] += jy * jx;
+			JTJ[1][1] += jy * jy;
+			JTJ[1][2] += jy * jz;
+			JTJ[2][0] += jz * jx;
+			JTJ[2][1] += jz * jy;
+			JTJ[2][2] += jz * jz;
 		}
 	}
 
-}
+	static bool SolveNormalSystem(const float JTJ[3][3], const float rhs[3], Vec3 &delta) noexcept
+	{
+		FixedMatrix<float, 3, 4> system;
+		system.Fill(0.0F);
+		for (size_t r = 0; r < 3; ++r)
+		{
+			for (size_t c = 0; c < 3; ++c)
+			{
+				system(r, c) = JTJ[r][c];
+			}
+			system(r, 3) = rhs[r];
+		}
 
+		if (!system.GaussJordan(3, 4))
+		{
+			return false;
+		}
+
+		delta.x = system(0, 3);
+		delta.y = system(1, 3);
+		delta.z = system(2, 3);
+		return true;
+	}
+
+	static SolverResult SolveHybrid(const std::vector<Vec3> &anchors, const std::vector<float> &lengths, Vec3 initial,
+									float eta, float tol, size_t halleyIters, size_t maxIters) noexcept
+	{
+		SolverResult result{};
+		result.pos = initial;
+
+		size_t iter = 0;
+		for (; iter < halleyIters && iter < maxIters; ++iter)
+		{
+			std::vector<float> residuals;
+			std::vector<Vec3> J;
+			std::vector<Hessian3> H;
+			result.cost = ResidualsAndDerivatives(anchors, lengths, result.pos, residuals, J, &H);
+
+			float JTJ[3][3];
+			float grad[3];
+			AccumulateJtJandGrad(J, residuals, JTJ, grad);
+			JTJ[0][0] += eta;
+			JTJ[1][1] += eta;
+			JTJ[2][2] += eta;
+
+			Vec3 deltaLm{};
+			const float rhs1[3] = {-grad[0], -grad[1], -grad[2]};
+			if (!SolveNormalSystem(JTJ, rhs1, deltaLm))
+			{
+				break;
+			}
+
+			std::vector<Vec3> Hbar(J.size());
+			for (size_t i = 0; i < J.size(); ++i)
+			{
+				Hbar[i].x = deltaLm.x * H[i][0][0] + deltaLm.y * H[i][1][0] + deltaLm.z * H[i][2][0];
+				Hbar[i].y = deltaLm.x * H[i][0][1] + deltaLm.y * H[i][1][1] + deltaLm.z * H[i][2][1];
+				Hbar[i].z = deltaLm.x * H[i][0][2] + deltaLm.y * H[i][1][2] + deltaLm.z * H[i][2][2];
+			}
+
+			std::vector<Vec3> Jbar(J.size());
+			for (size_t i = 0; i < J.size(); ++i)
+			{
+				Jbar[i].x = J[i].x + 0.5F * Hbar[i].x;
+				Jbar[i].y = J[i].y + 0.5F * Hbar[i].y;
+				Jbar[i].z = J[i].z + 0.5F * Hbar[i].z;
+			}
+
+			float JTJ2[3][3];
+			float grad2[3];
+			AccumulateJtJandGrad(Jbar, residuals, JTJ2, grad2);
+			JTJ2[0][0] += eta;
+			JTJ2[1][1] += eta;
+			JTJ2[2][2] += eta;
+
+			Vec3 delta{};
+			const float rhs2[3] = {-grad2[0], -grad2[1], -grad2[2]};
+			if (!SolveNormalSystem(JTJ2, rhs2, delta))
+			{
+				break;
+			}
+
+			result.pos = VecAdd(result.pos, delta);
+			result.iterations = iter + 1;
+			if (VecNorm(delta) < tol)
+			{
+				result.converged = true;
+				break;
+			}
+		}
+
+		for (; iter < maxIters && !result.converged; ++iter)
+		{
+			std::vector<float> residuals;
+			std::vector<Vec3> J;
+			result.cost = ResidualsAndDerivatives(anchors, lengths, result.pos, residuals, J, nullptr);
+
+			float JTJ[3][3];
+			float grad[3];
+			AccumulateJtJandGrad(J, residuals, JTJ, grad);
+			JTJ[0][0] += eta;
+			JTJ[1][1] += eta;
+			JTJ[2][2] += eta;
+
+			Vec3 delta{};
+			const float rhs3[3] = {-grad[0], -grad[1], -grad[2]};
+			if (!SolveNormalSystem(JTJ, rhs3, delta))
+			{
+				break;
+			}
+
+			result.pos = VecAdd(result.pos, delta);
+			result.iterations = iter + 1;
+			if (VecNorm(delta) < tol)
+			{
+				result.converged = true;
+				break;
+			}
+		}
+
+		std::vector<float> residuals;
+		std::vector<Vec3> Jtmp;
+		result.cost = ResidualsAndDerivatives(anchors, lengths, result.pos, residuals, Jtmp, nullptr);
+		return result;
+	}
+} // unnamed namespace
+
+void HangprinterKinematics::ForwardTransform(float const distances[HANGPRINTER_MAX_ANCHORS], float machinePos[3]) const noexcept
+{
+	std::vector<Vec3> anchorVec;
+	anchorVec.reserve(numAnchors);
+	for (size_t i = 0; i < numAnchors; ++i)
+	{
+		anchorVec.push_back(Vec3{anchors[i][X_AXIS], anchors[i][Y_AXIS], anchors[i][Z_AXIS]});
+	}
+
+	std::vector<float> lengths;
+	lengths.reserve(numAnchors);
+	for (size_t i = 0; i < numAnchors; ++i)
+	{
+		lengths.push_back(distances[i]);
+	}
+
+	constexpr float eta = 1.0e-3F;
+	constexpr float tol = 1.0e-3F;
+	constexpr size_t halleyIters = 3;
+	constexpr size_t maxIters = 30;
+	const SolverResult result = SolveHybrid(anchorVec, lengths, Vec3{0.0F, 0.0F, 0.0F}, eta, tol, halleyIters, maxIters);
+
+	machinePos[X_AXIS] = result.pos.x;
+	machinePos[Y_AXIS] = result.pos.y;
+	machinePos[Z_AXIS] = result.pos.z;
+}
 
 // Print all the parameters for debugging
 void HangprinterKinematics::PrintParameters(const StringRef& reply) const noexcept
