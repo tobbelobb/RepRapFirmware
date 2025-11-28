@@ -12,8 +12,6 @@
 
 #if SUPPORT_HANGPRINTER
 
-struct Vec3 { float x; float y; float z; };
-
 // Different modes can be configured for different tradeoffs in terms of printing volumes and speeds
 enum class HangprinterAnchorMode {
 	None, // All is reacheable in None anchor mode as printing volume
@@ -140,19 +138,17 @@ private:
 	};
 	struct StaticForcesResult {
 		float *tensions = nullptr;
-		Vec3 achievedForce = {0.0f, 0.0f, 0.0f};
-		Vec3 requestedForce = {0.0f, 0.0f, 0.0f};
-		Vec3 residual = {0.0f, 0.0f, 0.0f};
+		float achievedForce[3] = { 0.0F };
+		float requestedForce[3] = { 0.0F };
+		float residual[3] = { 0.0F };
 		float supportedGravityFrac = 0.0f;
 	};
 	void StaticForcesTikhonov(
-		const Vec3 &mover,
-		const Vec3 anchors[],
+		const float mover[3],
 		const StaticForcesConfig &cfg,
 		StaticForcesResult &out) const noexcept;
 	void StaticForcesQp(
-		const Vec3 &mover,
-		const Vec3 anchors[],
+		const float mover[3],
 		const StaticForcesConfig &cfg,
 		StaticForcesResult &out) const noexcept;
 	void flexDistances(float const machinePos[3], float const distances[HANGPRINTER_MAX_ANCHORS],

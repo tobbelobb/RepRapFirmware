@@ -1373,12 +1373,6 @@ float HangprinterKinematics::SpringK(float const springLength) const noexcept {
 
 
 void HangprinterKinematics::StaticForces(float const machinePos[3], float F[HANGPRINTER_MAX_ANCHORS]) const noexcept {
-	// TODO: We don't want this Vec3 data type and we don't want to create a copy of the anchor data here
-	Vec3 anchorVecs[HANGPRINTER_MAX_ANCHORS] = { 0.0f };
-	for (size_t i = 0; i < numAnchors; ++i)
-	{
-		anchorVecs[i] = { anchors[i][X_AXIS], anchors[i][Y_AXIS], anchors[i][Z_AXIS] };
-	}
 	StaticForcesConfig cfg;
 	cfg.ignoreGravity = ignoreGravity;
 	cfg.ignorePretension = ignorePretension;
@@ -1392,43 +1386,39 @@ void HangprinterKinematics::StaticForces(float const machinePos[3], float F[HANG
 
 	StaticForcesResult result;
 	result.tensions = F;
-	Vec3 mover = { machinePos[X_AXIS], machinePos[Y_AXIS], machinePos[Z_AXIS] };
 
 	if (flexAlgorithm == FlexAlgorithm::Tikhonov) {
-		StaticForcesTikhonov(mover, anchorVecs, cfg, result);
+		StaticForcesTikhonov(machinePos, cfg, result);
 	} else {
-		StaticForcesQp(mover, anchorVecs, cfg, result);
+		StaticForcesQp(machinePos, cfg, result);
 	}
 }
 
-static inline float dot(const Vec3 &a, const Vec3 &b) {
-	return a.x * b.x + a.y * b.y + a.z * b.z;
-}
-
-static inline Vec3 subtract(const Vec3 &a, const Vec3 &b) {
-	return {a.x - b.x, a.y - b.y, a.z - b.z};
-}
-
-static inline float norm(const Vec3 &v) {
-	return fastSqrtf(dot(v, v));
-}
-
-static inline Vec3 unit_or_zero(const Vec3 &v) {
+static inline void unit_or_zero(const float v[3], float ret[3]) {
 	const float n = norm(v);
-	if (n > 0.0f) {
-		const float inv = 1.0f / n;
-		return {v.x * inv, v.y * inv, v.z * inv};
+	if (n > 0.0F) {
+		const float inv = 1.0F / n;
+		ret[0] = v[0]*inv;
+		ret[1] = v[1]*inv;
+		ret[2] = v[2]*inv;
+	} else {
+		ret[0] = 0.0F;
+		ret[1] = 0.0F;
+		ret[2] = 0.0F;
 	}
-	return {0.0f, 0.0f, 0.0f};
 }
 
-static inline void build_direction_matrix(const Vec3 &mover, const Vec3 anchors[], int N, float *A) {
+static inline void build_direction_matrix(const float mover[3], const float anchors[HANGPRINTER_MAX_ANCHORS][3], int N, float *A) {
 	for (int j = 0; j < N; ++j) {
-		Vec3 diff = subtract(anchors[j], mover);
-		const Vec3 unit = unit_or_zero(diff);
-		A[0 * N + j] = unit.x;
-		A[1 * N + j] = unit.y;
-		A[2 * N + j] = unit.z;
+		float diff[3] = { 0.0 };
+		diff[0] = anchors[j][0] - mover[0];
+		diff[1] = anchors[j][1] - mover[1];
+		diff[2] = anchors[j][2] - mover[2];
+		float unit[3] = { 0.0 };
+		unit_or_zero(diff, unit);
+		A[0 * N + j] = unit[0];
+		A[1 * N + j] = unit[1];
+		A[2 * N + j] = unit[2];
 	}
 }
 
@@ -1465,7 +1455,7 @@ static inline bool invert3x3(const float M[3][3], float Minv[3][3], float eps = 
 	return true;
 }
 
-static inline void solve_min_norm_T(const float *A, int N, const Vec3 &Fext, float lambda, float *T) {
+static inline void solve_min_norm_T(const float *A, int N, const float Fext[3], float lambda, float *T) {
 	float S[3][3] = {{lambda, 0.0f, 0.0f}, {0.0f, lambda, 0.0f}, {0.0f, 0.0f, lambda}};
 	for (int j = 0; j < N; ++j) {
 		const float ax = A[0 * N + j], ay = A[1 * N + j], az = A[2 * N + j];
@@ -1487,9 +1477,9 @@ static inline void solve_min_norm_T(const float *A, int N, const Vec3 &Fext, flo
 		S[2][2] += 1e-6f;
 		invert3x3(S, Sinv);
 	}
-	const float y0 = Sinv[0][0] * Fext.x + Sinv[0][1] * Fext.y + Sinv[0][2] * Fext.z;
-	const float y1 = Sinv[1][0] * Fext.x + Sinv[1][1] * Fext.y + Sinv[1][2] * Fext.z;
-	const float y2 = Sinv[2][0] * Fext.x + Sinv[2][1] * Fext.y + Sinv[2][2] * Fext.z;
+	const float y0 = Sinv[0][0] * Fext[0] + Sinv[0][1] * Fext[1] + Sinv[0][2] * Fext[2];
+	const float y1 = Sinv[1][0] * Fext[0] + Sinv[1][1] * Fext[1] + Sinv[1][2] * Fext[2];
+	const float y2 = Sinv[2][0] * Fext[0] + Sinv[2][1] * Fext[1] + Sinv[2][2] * Fext[2];
 
 	for (int j = 0; j < N; ++j) {
 		const float ax = A[0 * N + j], ay = A[1 * N + j], az = A[2 * N + j];
@@ -1543,15 +1533,19 @@ static inline void proj_nullspace(const float *P, int N, const float *v, float *
 	}
 }
 
-static inline Vec3 applyA(const float* A, int N, const float* T)
+static inline void applyA(const float* A, int N, const float* T, float res[3])
 {
-	float fx=0, fy=0, fz=0;
+	float fx = 0.0F;
+	float fy = 0.0F;
+	float fz = 0.0F;
 	for (int j = 0; j < N; ++j){
 		fx += A[0*N + j]*T[j];
 		fy += A[1*N + j]*T[j];
 		fz += A[2*N + j]*T[j];
 	}
-	return Vec3{fx, fy, fz};
+	res[0] = fx;
+	res[1] = fy;
+	res[2] = fz;
 }
 
 static inline bool chol_decompose(double *G, int k) {
@@ -1587,7 +1581,7 @@ static inline void chol_solve(const double *L, int k, const double *b, double *x
 		}
 		y[i] = s / L[i * k + i];
 	}
-  std::fill_n(x, k, 0.0);
+	std::fill_n(x, k, 0.0);
 	for (int i = k - 1; i >= 0; --i) {
 		double s = y[i];
 		for (int p = i + 1; p < k; ++p) {
@@ -1597,13 +1591,13 @@ static inline void chol_solve(const double *L, int k, const double *b, double *x
 	}
 }
 
-static inline void solve_box_ridge_ls(const float *A, int N, const Vec3 &F, double lambda, const double *L, const double *U, int max_iters, double tol, double *T_out) {
+static inline void solve_box_ridge_ls(const float *A, int N, const float F[3], double lambda, const double *L, const double *U, int max_iters, double tol, double *T_out) {
 	double H[HANGPRINTER_MAX_ANCHORS * HANGPRINTER_MAX_ANCHORS] = { 0.0 };
 	double f[HANGPRINTER_MAX_ANCHORS] = { 0.0 };
 
 	for (int i = 0; i < N; ++i) {
 		const double aix = A[0 * N + i], aiy = A[1 * N + i], aiz = A[2 * N + i];
-		f[i] = aix * F.x + aiy * F.y + aiz * F.z;
+		f[i] = aix * F[0] + aiy * F[1] + aiz * F[2];
 		for (int j = 0; j <= i; ++j) {
 			const double ajx = A[0 * N + j], ajy = A[1 * N + j], ajz = A[2 * N + j];
 			const double dot = aix * ajx + aiy * ajy + aiz * ajz;
@@ -1777,8 +1771,7 @@ static inline void solve_box_ridge_ls(const float *A, int N, const Vec3 &F, doub
 }
 
 void HangprinterKinematics::StaticForcesTikhonov(
-	const Vec3 &mover,
-	const Vec3 anchors[],
+	const float mover[3],
 	const StaticForcesConfig &cfg,
 	StaticForcesResult &out) const noexcept
 {
@@ -1786,13 +1779,15 @@ void HangprinterKinematics::StaticForcesTikhonov(
 	float A[3 * HANGPRINTER_MAX_ANCHORS] = {0.0f};
 	build_direction_matrix(mover, anchors, numAnchors, A);
 
-	out.requestedForce = {0.0f, 0.0f, 0.0f};
+	out.requestedForce[0] = 0.0F;
+	out.requestedForce[1] = 0.0F;
+	out.requestedForce[2] = 0.0F;
 	for (size_t i = 0; i < numAnchors; ++i) {
 		T[i] = 0.0f;
 	}
 
 	if (!cfg.ignoreGravity) {
-		out.requestedForce = {0.0f, 0.0f, cfg.massKg * cfg.g};
+		out.requestedForce[2] = cfg.massKg * cfg.g;
 		solve_min_norm_T(A, numAnchors, out.requestedForce, cfg.lambda, T);
 	}
 
@@ -1837,21 +1832,19 @@ void HangprinterKinematics::StaticForcesTikhonov(
 		}
 	}
 
-	out.achievedForce = applyA(A, numAnchors, T);
-	out.residual = {
-		out.requestedForce.x - out.achievedForce.x,
-		out.requestedForce.y - out.achievedForce.y,
-		out.requestedForce.z - out.achievedForce.z
-	};
+	applyA(A, numAnchors, T, out.achievedForce);
+	out.residual[0] = out.requestedForce[0] - out.achievedForce[0];
+	out.residual[1] = out.requestedForce[1] - out.achievedForce[1];
+	out.residual[2] = out.requestedForce[2] - out.achievedForce[2];
+
 	out.supportedGravityFrac = 0.0f;
-	if (!cfg.ignoreGravity && out.requestedForce.z > 1e-9f) {
-		out.supportedGravityFrac = out.achievedForce.z / out.requestedForce.z;
+	if (!cfg.ignoreGravity && out.requestedForce[2] > 1e-9f) {
+		out.supportedGravityFrac = out.achievedForce[2] / out.requestedForce[2];
 	}
 }
 
 void HangprinterKinematics::StaticForcesQp(
-	const Vec3 &mover,
-	const Vec3 anchors[],
+	const float mover[3],
 	const StaticForcesConfig &cfg,
 	StaticForcesResult &out) const noexcept
 {
@@ -1859,9 +1852,11 @@ void HangprinterKinematics::StaticForcesQp(
 	float A[3 * HANGPRINTER_MAX_ANCHORS] = {0.0f};
 	build_direction_matrix(mover, anchors, numAnchors, A);
 
-	out.requestedForce = {0.0f, 0.0f, 0.0f};
+	out.requestedForce[0] = 0.0F;
+	out.requestedForce[1] = 0.0F;
+	out.requestedForce[2] = 0.0F;
 	if (!cfg.ignoreGravity) {
-		out.requestedForce = {0.0f, 0.0f, cfg.massKg * cfg.g};
+		out.requestedForce[2] = cfg.massKg * cfg.g;
 	}
 
 	double L[HANGPRINTER_MAX_ANCHORS];
@@ -1885,15 +1880,13 @@ void HangprinterKinematics::StaticForcesQp(
 		T[i] = (float)Td[i];
 	}
 
-	out.achievedForce = applyA(A, numAnchors, T);
-	out.residual = {
-		out.requestedForce.x - out.achievedForce.x,
-		out.requestedForce.y - out.achievedForce.y,
-		out.requestedForce.z - out.achievedForce.z
-	};
+	applyA(A, numAnchors, T, out.achievedForce);
+	out.residual[0] = out.requestedForce[0] - out.achievedForce[0];
+	out.residual[1] = out.requestedForce[1] - out.achievedForce[1];
+	out.residual[2] = out.requestedForce[2] - out.achievedForce[2];
 	out.supportedGravityFrac = 0.0f;
-	if (!cfg.ignoreGravity && out.requestedForce.z > 1e-9f) {
-		out.supportedGravityFrac = out.achievedForce.z / out.requestedForce.z;
+	if (!cfg.ignoreGravity && out.requestedForce[2] > 1e-9f) {
+		out.supportedGravityFrac = out.achievedForce[2] / out.requestedForce[2];
 	}
 }
 
