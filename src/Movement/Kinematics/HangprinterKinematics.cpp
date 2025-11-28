@@ -25,13 +25,6 @@
 #include <General/Portability.h>
 #include <General/String.h>
 
-constexpr float DefaultAnchors[5][3] = {{    0.0, -2000.0, -100.0},
-                                        { 2000.0,  1000.0, -100.0},
-                                        {-2000.0,  1000.0, -100.0},
-                                        {    0.0,     0.0, 3000.0},
-                                        {    0.0,     0.0,    0.0}};
-constexpr float DefaultPrintRadius = 1500.0;
-
 
 // Object model table and functions
 // Note: if using GCC version 7.3.1 20180622 and lambda functions are used in this table, you must compile this file with option -std=gnu++17.
@@ -114,9 +107,19 @@ void HangprinterKinematics::Init() noexcept
 	constexpr float DefaultMaxForce_Newton[HANGPRINTER_MAX_ANCHORS] = { 70.0F, 70.0F, 70.0F, 70.0F, 70.0F };
 	constexpr float DefaultGuyWireLengths[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	constexpr float DefaultTorqueConstants[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
+	constexpr float DefaultAnchors[HANGPRINTER_MAX_ANCHORS][3] =
+		{{    0.0, -2000.0, -100.0},
+		 { 2000.0,  1000.0, -100.0},
+		 {-2000.0,  1000.0, -100.0},
+		 {    0.0,     0.0, 3000.0},
+		 {    0.0,     0.0,    0.0},
+		 {    0.0,     0.0,    0.0},
+		 {    0.0,     0.0,    0.0},
+		 {    0.0,     0.0,    0.0}};
+	constexpr float DefaultPrintRadius = 1500.0;
 
 	ARRAY_INIT(anchors, DefaultAnchors);
-	anchorMode = HangprinterAnchorMode::LastOnTop;
+	anchorMode = HangprinterAnchorMode::None;
 	numAnchors = DefaultNumAnchors;
 	printRadius = DefaultPrintRadius;
 	spoolBuildupFactor = DefaultSpoolBuildupFactor;
@@ -138,6 +141,10 @@ void HangprinterKinematics::Init() noexcept
 
 static inline float hyp3(float const a[3], float const b[3]) {
 	return fastSqrtf(fsquare(a[2] - b[2]) + fsquare(a[1] - b[1]) + fsquare(a[0] - b[0]));
+}
+
+static inline float norm(float const a[3]) {
+	return fastSqrtf(fsquare(a[2]) + fsquare(a[1]) + fsquare(a[0]));
 }
 
 // Recalculate the derived parameters
@@ -449,28 +456,27 @@ MovementError HangprinterKinematics::CartesianToMotorSteps(const float machinePo
 {
 	float distances[HANGPRINTER_MAX_ANCHORS];
 	for (size_t i = 0; i < numAnchors; ++i)
-  {
+	{
 		distances[i] = hyp3(machinePos, anchors[i]);
 	}
 
 	float linePos[HANGPRINTER_MAX_ANCHORS];
-
-  if (flexEnabled)
-  {
+	if (flexEnabled)
+	{
 		float flex[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 		flexDistances(machinePos, distances, flex);
 		for (size_t i = 0; i < numAnchors; ++i)
-    {
-			linePos[i] = distances[i] - distancesOrigin[i] - flex[i];
+		{
+			linePos[i] = distances[i] - distancesOrigin[i] + flex[i];
 		}
-  }
-  else
-  {
+	}
+	else
+	{
 		for (size_t i = 0; i < numAnchors; ++i)
-    {
+		{
 			linePos[i] = distances[i] - distancesOrigin[i];
 		}
-  }
+	}
 
 	MovementError rslt = MovementError::ok;
 	for (size_t i = 0; i < numAnchors; ++i)
@@ -481,6 +487,7 @@ MovementError HangprinterKinematics::CartesianToMotorSteps(const float machinePo
 		}
 		else
 		{
+			// This logic should be called LinePosToMotorPos
 			RoundToInt32(rslt, k0[i] * (fastSqrtf(spoolRadiiSq[i] + linePos[i] * k2[i]) - spoolRadii[i]), motorPos[i]);
 		}
 	}
@@ -499,6 +506,17 @@ inline float HangprinterKinematics::MotorPosToLinePos(const int32_t motorPos, si
 }
 
 
+void HangprinterKinematics::flexDistances(float const machinePos[3],
+                                          float flex[HANGPRINTER_MAX_ANCHORS]) const noexcept {
+	float distances[HANGPRINTER_MAX_ANCHORS];
+	for (size_t i = 0; i < numAnchors; ++i)
+	{
+		distances[i] = hyp3(machinePos, anchors[i]);
+	}
+	flexDistances(machinePos, distances, flex);
+}
+
+
 void HangprinterKinematics::flexDistances(float const machinePos[3], float const distances[HANGPRINTER_MAX_ANCHORS],
                                           float flex[HANGPRINTER_MAX_ANCHORS]) const noexcept {
 	float springKs[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
@@ -510,20 +528,245 @@ void HangprinterKinematics::flexDistances(float const machinePos[3], float const
 	StaticForces(machinePos, F);
 
 	for (size_t i = 0; i < numAnchors; ++i) {
-		flex[i] = F[i] / (springKs[i] * mechanicalAdvantage[i]);
+		flex[i] = -F[i] / (springKs[i] * mechanicalAdvantage[i]);
 	}
 }
 
+// Start of forward kinematics stuff
+float HangprinterKinematics::ResidualsAndDerivatives(
+                                     const float linePositions[HANGPRINTER_MAX_ANCHORS],
+                                     float const pos[3],
+                                     float residuals[HANGPRINTER_MAX_ANCHORS],
+                                     float jacobian[HANGPRINTER_MAX_ANCHORS][3],
+                                     float (*hessians)[3][3]) const noexcept {
+	float baseImpact[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
+	float impactPlus[HANGPRINTER_MAX_ANCHORS][3] = { 0.0F };
+	float impactMinus[HANGPRINTER_MAX_ANCHORS][3] = { 0.0F };
+	constexpr float impactStep = 1e-3F;
+
+	if (flexEnabled) {
+		flexDistances(pos, baseImpact);
+		for (size_t axis = 0; axis < 3; ++axis) {
+			float shifted[3] = { pos[0], pos[1], pos[2] };
+			shifted[axis] += impactStep;
+			flexDistances(shifted, impactPlus[axis]);
+			shifted[axis] = pos[axis];
+			shifted[axis] -= impactStep;
+			flexDistances(shifted, impactMinus[axis]);
+		}
+	}
+
+	float cost = 0.0F;
+	for (size_t i = 0; i < numAnchors; ++i) {
+		float diff[3] = { pos[0] - anchors[i][0], pos[1] - anchors[i][1], pos[2] - anchors[i][2] };
+		float distance = norm(diff);
+		if (distance < 1e-6F) {
+			distance = 1e-6F;
+		}
+		const float invLen = 1.0F / distance;
+		const float invLen3 = invLen * invLen * invLen;
+
+		const float flex = baseImpact[i];
+		const float foundLinePos = distance - distancesOrigin[i] + flex;
+		residuals[i] = foundLinePos - linePositions[i];
+
+		if (hessians) {
+			float (&H)[3][3] = hessians[i];
+			for (size_t r = 0; r < 3; ++r) {
+				for (size_t c = 0; c < 3; ++c) {
+					const float id = (r == c) ? invLen : 0.0F;
+					H[r][c] = id - diff[r] * diff[c] * invLen3;
+				}
+			}
+		}
+
+		for (size_t axis = 0; axis < 3; ++axis) {
+			const float impactDeriv = (impactPlus[axis][i] - impactMinus[axis][i]) / (2.0F * impactStep);
+			jacobian[i][axis] = diff[axis] * invLen + impactDeriv;
+		}
+
+		cost += 0.5F * residuals[i] * residuals[i];
+	}
+	return cost;
+}
+
+static bool solveNormalSystem(const float JTJ[3][3], const float rhs[3], float delta[3]) {
+	FixedMatrix<float, 3, 4> system{};
+	for (size_t r = 0; r < 3; ++r) {
+		for (size_t c = 0; c < 3; ++c) {
+			system(r, c) = JTJ[r][c];
+		}
+		system(r, 3) = rhs[r];
+	}
+	if (!system.GaussJordan(3, 4)) {
+		return false;
+	}
+	delta[0] = system(0, 3);
+	delta[1] = system(1, 3);
+	delta[2] = system(2, 3);
+	return true;
+}
+
+void HangprinterKinematics::AccumulateJtJandGrad(
+       float const J[HANGPRINTER_MAX_ANCHORS][3],
+       float const residuals[HANGPRINTER_MAX_ANCHORS],
+       float JTJ[3][3], float grad[3]) const noexcept {
+	for (size_t i = 0; i < 3; ++i) {
+		grad[i] = 0.0F;
+		for (size_t j = 0; j < 3; ++j) {
+			JTJ[i][j] = 0.0F;
+		}
+	}
+
+	for (size_t i = 0; i < numAnchors; ++i) {
+		grad[0] += J[i][0] * residuals[i];
+		grad[1] += J[i][1] * residuals[i];
+		grad[2] += J[i][2] * residuals[i];
+
+		JTJ[0][0] += J[i][0] * J[i][0];
+		JTJ[0][1] += J[i][0] * J[i][1];
+		JTJ[0][2] += J[i][0] * J[i][2];
+		JTJ[1][0] += J[i][1] * J[i][0];
+		JTJ[1][1] += J[i][1] * J[i][1];
+		JTJ[1][2] += J[i][1] * J[i][2];
+		JTJ[2][0] += J[i][2] * J[i][0];
+		JTJ[2][1] += J[i][2] * J[i][1];
+		JTJ[2][2] += J[i][2] * J[i][2];
+	}
+}
+
+
+// A 3T (no rotations) version of Henry Mahnke & Ryan J. Caverly's
+// "Fast and Reliable Iterative Cable-Driven Parallel Robot Forward Kinematics: A Quadratic Approximation Approach"
+// https://doi.org/10.1007/978-3-031-94608-0_1
+// Extensive testing and comparisons to other methods done in
+// github.com/tobbelobb/hangprinter-forward-transform
+HangprinterKinematics::SolverResult HangprinterKinematics::SolveHybrid(
+                                      const float linePositions[HANGPRINTER_MAX_ANCHORS],
+                                      float initial[3],
+                                      float eta,
+                                      float tol,
+                                      size_t halleyIters,
+                                      size_t maxIters) const noexcept {
+	SolverResult result{};
+	result.pos[0] = initial[0];
+	result.pos[1] = initial[1];
+	result.pos[2] = initial[2];
+	size_t iter = 0;
+	for (; iter < halleyIters && iter < maxIters; ++iter) {
+		float residuals[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
+		float J[HANGPRINTER_MAX_ANCHORS][3];
+		float H[HANGPRINTER_MAX_ANCHORS][3][3];
+		result.cost =
+		    ResidualsAndDerivatives(linePositions, result.pos, residuals, J, H);
+
+		float JTJ[3][3];
+		float grad[3];
+		AccumulateJtJandGrad(J, residuals, JTJ, grad);
+		JTJ[0][0] += eta;
+		JTJ[1][1] += eta;
+		JTJ[2][2] += eta;
+
+		float deltaLm[3] = { 0.0F };
+		float rhs1[3] = {-grad[0], -grad[1], -grad[2]};
+		if (!solveNormalSystem(JTJ, rhs1, deltaLm)) {
+			break;
+		}
+
+		float Hbar[HANGPRINTER_MAX_ANCHORS][3];
+		for (size_t i = 0; i < numAnchors; ++i) {
+			Hbar[i][0] = deltaLm[0] * H[i][0][0] + deltaLm[1] * H[i][1][0] + deltaLm[2] * H[i][2][0];
+			Hbar[i][1] = deltaLm[0] * H[i][0][1] + deltaLm[1] * H[i][1][1] + deltaLm[2] * H[i][2][1];
+			Hbar[i][2] = deltaLm[0] * H[i][0][2] + deltaLm[1] * H[i][1][2] + deltaLm[2] * H[i][2][2];
+		}
+
+		float Jbar[HANGPRINTER_MAX_ANCHORS][3];
+		for (size_t i = 0; i < numAnchors; ++i) {
+			Jbar[i][0] = J[i][0] + 0.5F * Hbar[i][0];
+			Jbar[i][1] = J[i][1] + 0.5F * Hbar[i][1];
+			Jbar[i][2] = J[i][2] + 0.5F * Hbar[i][2];
+		}
+
+		float JTJ2[3][3];
+		float grad2[3];
+		AccumulateJtJandGrad(Jbar, residuals, JTJ2, grad2);
+		JTJ2[0][0] += eta;
+		JTJ2[1][1] += eta;
+		JTJ2[2][2] += eta;
+
+		float delta[3] = { 0.0F };
+		float rhs2[3] = {-grad2[0], -grad2[1], -grad2[2]};
+		if (!solveNormalSystem(JTJ2, rhs2, delta)) {
+			break;
+		}
+
+		result.pos[0] = result.pos[0] + delta[0];
+		result.pos[1] = result.pos[1] + delta[1];
+		result.pos[2] = result.pos[2] + delta[2];
+		result.iterations = iter + 1;
+		if (norm(delta) < tol) {
+			result.converged = true;
+			break;
+		}
+	}
+
+	for (; iter < maxIters && !result.converged; ++iter) {
+		float residuals[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
+		float J[HANGPRINTER_MAX_ANCHORS][3];
+		result.cost =
+		    ResidualsAndDerivatives(linePositions, result.pos, residuals, J, nullptr);
+
+		float JTJ[3][3];
+		float grad[3];
+		AccumulateJtJandGrad(J, residuals, JTJ, grad);
+		JTJ[0][0] += eta;
+		JTJ[1][1] += eta;
+		JTJ[2][2] += eta;
+
+		float delta[3] = { 0.0F };
+		float rhs3[3] = {-grad[0], -grad[1], -grad[2]};
+		if (!solveNormalSystem(JTJ, rhs3, delta)) {
+			break;
+		}
+
+		result.pos[0] = result.pos[0] + delta[0];
+		result.pos[1] = result.pos[1] + delta[1];
+		result.pos[2] = result.pos[2] + delta[2];
+		result.iterations = iter + 1;
+		if (norm(delta) < tol) {
+			result.converged = true;
+			break;
+		}
+	}
+
+	float residuals[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
+	float Jtmp[HANGPRINTER_MAX_ANCHORS][3];
+	result.cost =
+	    ResidualsAndDerivatives(linePositions, result.pos, residuals, Jtmp, nullptr);
+	return result;
+}
+
 // Convert motor coordinates to machine coordinates.
-// Assumes lines are tight and anchor location norms are followed
 void HangprinterKinematics::MotorStepsToCartesian(const int32_t motorPos[], const float stepsPerMm[], size_t numVisibleAxes, size_t numTotalAxes, float machinePos[]) const noexcept
 {
-	float lengths[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
+	// Define the line positions the solver should try to find
+	float linePositions[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	for (size_t i = 0; i < numAnchors; ++i) {
-		lengths[i] = MotorPosToLinePos(motorPos[i], i) + distancesOrigin[i];
+		linePositions[i] = MotorPosToLinePos(motorPos[i], i);
 	};
-	ForwardTransform(lengths, machinePos);
+
+	float guess[3] = { 0.0F };
+	SolverResult const res = SolveHybrid(linePositions, guess, 1e-3F, 1e-3F, 3, 30);
+	if (!res.converged || res.cost > 10.0F) {
+		return;
+	}
+	machinePos[0] = res.pos[0];
+	machinePos[1] = res.pos[1];
+	machinePos[2] = res.pos[2];
 }
+
+// End of forward kinematics stuff
+
 
 static bool isSameSide(float const v0[3], float const v1[3], float const v2[3], float const v3[3], float const p[3]){
 	float const h0[3] = {v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]};
@@ -808,270 +1051,6 @@ bool HangprinterKinematics::WriteResumeSettings(FileStore *f) const noexcept
 }
 
 #endif
-
-
-namespace
-{
-	struct SolverResult {
-		Vec3 pos{0.0F, 0.0F, 0.0F};
-		bool converged{false};
-		size_t iterations{0};
-		float cost{std::numeric_limits<float>::infinity()};
-	};
-
-	using Hessian3 = std::array<std::array<float, 3>, 3>;
-
-	static inline Vec3 VecAdd(const Vec3 &a, const Vec3 &b) noexcept
-	{
-		return {a.x + b.x, a.y + b.y, a.z + b.z};
-	}
-
-	static inline Vec3 VecScale(const Vec3 &a, float s) noexcept
-	{
-		return {a.x * s, a.y * s, a.z * s};
-	}
-
-	static inline float VecNorm(const Vec3 &v) noexcept
-	{
-		return fastSqrtf(fsquare(v.x) + fsquare(v.y) + fsquare(v.z));
-	}
-
-	static float ResidualsAndDerivatives(const std::vector<Vec3> &anchors, const std::vector<float> &lengths,
-										const Vec3 &pos, std::vector<float> &residuals, std::vector<Vec3> &jacobian,
-										std::vector<Hessian3> *hessians) noexcept
-	{
-		const size_t m = anchors.size();
-		residuals.resize(m);
-		jacobian.resize(m);
-		if (hessians != nullptr)
-		{
-			hessians->assign(m, Hessian3());
-		}
-
-		float cost = 0.0F;
-		for (size_t i = 0; i < m; ++i)
-		{
-			const Vec3 diff{pos.x - anchors[i].x, pos.y - anchors[i].y, pos.z - anchors[i].z};
-			float len = VecNorm(diff);
-			if (len < 1.0e-6F)
-			{
-				len = 1.0e-6F;
-			}
-			const float invLen = 1.0F / len;
-			const float invLen3 = invLen * invLen * invLen;
-
-			residuals[i] = len - lengths[i];
-			jacobian[i] = VecScale(diff, invLen);
-
-			if (hessians != nullptr)
-			{
-				Hessian3 H{};
-				const float diffArr[3] = {diff.x, diff.y, diff.z};
-				for (size_t r = 0; r < 3; ++r)
-				{
-					for (size_t c = 0; c < 3; ++c)
-					{
-						const float id = (r == c) ? invLen : 0.0F;
-						H[r][c] = id - diffArr[r] * diffArr[c] * invLen3;
-					}
-				}
-				(*hessians)[i] = H;
-			}
-
-			cost += 0.5F * residuals[i] * residuals[i];
-		}
-
-		return cost;
-	}
-
-	static void AccumulateJtJandGrad(const std::vector<Vec3> &J, const std::vector<float> &residuals,
-									float JTJ[3][3], float grad[3]) noexcept
-	{
-		for (size_t i = 0; i < 3; ++i)
-		{
-			grad[i] = 0.0F;
-			for (size_t j = 0; j < 3; ++j)
-			{
-				JTJ[i][j] = 0.0F;
-			}
-		}
-
-		for (size_t i = 0; i < J.size(); ++i)
-		{
-			const float jx = J[i].x;
-			const float jy = J[i].y;
-			const float jz = J[i].z;
-			const float res = residuals[i];
-
-			grad[0] += jx * res;
-			grad[1] += jy * res;
-			grad[2] += jz * res;
-
-			JTJ[0][0] += jx * jx;
-			JTJ[0][1] += jx * jy;
-			JTJ[0][2] += jx * jz;
-			JTJ[1][0] += jy * jx;
-			JTJ[1][1] += jy * jy;
-			JTJ[1][2] += jy * jz;
-			JTJ[2][0] += jz * jx;
-			JTJ[2][1] += jz * jy;
-			JTJ[2][2] += jz * jz;
-		}
-	}
-
-	static bool SolveNormalSystem(const float JTJ[3][3], const float rhs[3], Vec3 &delta) noexcept
-	{
-		FixedMatrix<float, 3, 4> system;
-		system.Fill(0.0F);
-		for (size_t r = 0; r < 3; ++r)
-		{
-			for (size_t c = 0; c < 3; ++c)
-			{
-				system(r, c) = JTJ[r][c];
-			}
-			system(r, 3) = rhs[r];
-		}
-
-		if (!system.GaussJordan(3, 4))
-		{
-			return false;
-		}
-
-		delta.x = system(0, 3);
-		delta.y = system(1, 3);
-		delta.z = system(2, 3);
-		return true;
-	}
-
-	static SolverResult SolveHybrid(const std::vector<Vec3> &anchors, const std::vector<float> &lengths, Vec3 initial,
-									float eta, float tol, size_t halleyIters, size_t maxIters) noexcept
-	{
-		SolverResult result{};
-		result.pos = initial;
-
-		size_t iter = 0;
-		for (; iter < halleyIters && iter < maxIters; ++iter)
-		{
-			std::vector<float> residuals;
-			std::vector<Vec3> J;
-			std::vector<Hessian3> H;
-			result.cost = ResidualsAndDerivatives(anchors, lengths, result.pos, residuals, J, &H);
-
-			float JTJ[3][3];
-			float grad[3];
-			AccumulateJtJandGrad(J, residuals, JTJ, grad);
-			JTJ[0][0] += eta;
-			JTJ[1][1] += eta;
-			JTJ[2][2] += eta;
-
-			Vec3 deltaLm{};
-			const float rhs1[3] = {-grad[0], -grad[1], -grad[2]};
-			if (!SolveNormalSystem(JTJ, rhs1, deltaLm))
-			{
-				break;
-			}
-
-			std::vector<Vec3> Hbar(J.size());
-			for (size_t i = 0; i < J.size(); ++i)
-			{
-				Hbar[i].x = deltaLm.x * H[i][0][0] + deltaLm.y * H[i][1][0] + deltaLm.z * H[i][2][0];
-				Hbar[i].y = deltaLm.x * H[i][0][1] + deltaLm.y * H[i][1][1] + deltaLm.z * H[i][2][1];
-				Hbar[i].z = deltaLm.x * H[i][0][2] + deltaLm.y * H[i][1][2] + deltaLm.z * H[i][2][2];
-			}
-
-			std::vector<Vec3> Jbar(J.size());
-			for (size_t i = 0; i < J.size(); ++i)
-			{
-				Jbar[i].x = J[i].x + 0.5F * Hbar[i].x;
-				Jbar[i].y = J[i].y + 0.5F * Hbar[i].y;
-				Jbar[i].z = J[i].z + 0.5F * Hbar[i].z;
-			}
-
-			float JTJ2[3][3];
-			float grad2[3];
-			AccumulateJtJandGrad(Jbar, residuals, JTJ2, grad2);
-			JTJ2[0][0] += eta;
-			JTJ2[1][1] += eta;
-			JTJ2[2][2] += eta;
-
-			Vec3 delta{};
-			const float rhs2[3] = {-grad2[0], -grad2[1], -grad2[2]};
-			if (!SolveNormalSystem(JTJ2, rhs2, delta))
-			{
-				break;
-			}
-
-			result.pos = VecAdd(result.pos, delta);
-			result.iterations = iter + 1;
-			if (VecNorm(delta) < tol)
-			{
-				result.converged = true;
-				break;
-			}
-		}
-
-		for (; iter < maxIters && !result.converged; ++iter)
-		{
-			std::vector<float> residuals;
-			std::vector<Vec3> J;
-			result.cost = ResidualsAndDerivatives(anchors, lengths, result.pos, residuals, J, nullptr);
-
-			float JTJ[3][3];
-			float grad[3];
-			AccumulateJtJandGrad(J, residuals, JTJ, grad);
-			JTJ[0][0] += eta;
-			JTJ[1][1] += eta;
-			JTJ[2][2] += eta;
-
-			Vec3 delta{};
-			const float rhs3[3] = {-grad[0], -grad[1], -grad[2]};
-			if (!SolveNormalSystem(JTJ, rhs3, delta))
-			{
-				break;
-			}
-
-			result.pos = VecAdd(result.pos, delta);
-			result.iterations = iter + 1;
-			if (VecNorm(delta) < tol)
-			{
-				result.converged = true;
-				break;
-			}
-		}
-
-		std::vector<float> residuals;
-		std::vector<Vec3> Jtmp;
-		result.cost = ResidualsAndDerivatives(anchors, lengths, result.pos, residuals, Jtmp, nullptr);
-		return result;
-	}
-} // unnamed namespace
-
-void HangprinterKinematics::ForwardTransform(float const distances[HANGPRINTER_MAX_ANCHORS], float machinePos[3]) const noexcept
-{
-	std::vector<Vec3> anchorVec;
-	anchorVec.reserve(numAnchors);
-	for (size_t i = 0; i < numAnchors; ++i)
-	{
-		anchorVec.push_back(Vec3{anchors[i][X_AXIS], anchors[i][Y_AXIS], anchors[i][Z_AXIS]});
-	}
-
-	std::vector<float> lengths;
-	lengths.reserve(numAnchors);
-	for (size_t i = 0; i < numAnchors; ++i)
-	{
-		lengths.push_back(distances[i]);
-	}
-
-	constexpr float eta = 1.0e-3F;
-	constexpr float tol = 1.0e-3F;
-	constexpr size_t halleyIters = 3;
-	constexpr size_t maxIters = 30;
-	const SolverResult result = SolveHybrid(anchorVec, lengths, Vec3{0.0F, 0.0F, 0.0F}, eta, tol, halleyIters, maxIters);
-
-	machinePos[X_AXIS] = result.pos.x;
-	machinePos[Y_AXIS] = result.pos.y;
-	machinePos[Z_AXIS] = result.pos.z;
-}
 
 // Print all the parameters for debugging
 void HangprinterKinematics::PrintParameters(const StringRef& reply) const noexcept

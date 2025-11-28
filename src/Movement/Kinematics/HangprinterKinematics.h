@@ -70,7 +70,7 @@ private:
 
 	// Basic facts about movement system
 	static constexpr const char*_ecv_array ANCHOR_CHARS = "ABCDIJKLO";
-	static constexpr size_t HANGPRINTER_MAX_ANCHORS = 5;
+	static constexpr size_t HANGPRINTER_MAX_ANCHORS = 8;
 	static constexpr size_t DefaultNumAnchors = 4;
 
 	// Constructors
@@ -82,10 +82,9 @@ private:
 	float MotorPosToLinePos(const int32_t motorPos, size_t axis) const noexcept;
 
 	void PrintParameters(const StringRef& reply) const noexcept;			// Print all the parameters for debugging
-	void ApplyFlexPretension(GCodeBuffer& gb, const StringRef& reply) noexcept;
 
 	// The real defaults are in the cpp file
-	HangprinterAnchorMode anchorMode = HangprinterAnchorMode::LastOnTop;
+	HangprinterAnchorMode anchorMode = HangprinterAnchorMode::None;
 	size_t numAnchors = DefaultNumAnchors;
 	float printRadius = 0.0F;
 	float anchors[HANGPRINTER_MAX_ANCHORS][3];
@@ -157,6 +156,33 @@ private:
 		StaticForcesResult &out) const noexcept;
 	void flexDistances(float const machinePos[3], float const distances[HANGPRINTER_MAX_ANCHORS],
 	                   float flex[HANGPRINTER_MAX_ANCHORS]) const noexcept;
+	void flexDistances(float const machinePos[3],
+	                   float flex[HANGPRINTER_MAX_ANCHORS]) const noexcept;
+
+
+	struct SolverResult {
+		float pos[3] = { 0.0F };
+		bool converged{false};
+		size_t iterations{0};
+		float cost{std::numeric_limits<float>::infinity()};
+	};
+
+	void AccumulateJtJandGrad(float const J[HANGPRINTER_MAX_ANCHORS][3],
+	                          float const residuals[HANGPRINTER_MAX_ANCHORS],
+	                          float JTJ[3][3], float grad[3]) const noexcept;
+
+	float ResidualsAndDerivatives(const float linePositions[HANGPRINTER_MAX_ANCHORS],
+	                              float const pos[3],
+	                              float residuals[HANGPRINTER_MAX_ANCHORS],
+	                              float jacobian[HANGPRINTER_MAX_ANCHORS][3],
+	                              float (*hessians)[3][3] = nullptr) const noexcept;
+
+	SolverResult SolveHybrid(const float linePositions[HANGPRINTER_MAX_ANCHORS],
+	                         float initial[3],
+	                         float eta,
+	                         float tol,
+	                         size_t halleyIters,
+	                         size_t maxIters) const noexcept;
 
 #if DUAL_CAN
 	// Some CAN helpers
