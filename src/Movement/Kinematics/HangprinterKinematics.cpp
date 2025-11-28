@@ -13,7 +13,6 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <cstring> // for memcpy, memset
 
 #include <Platform/RepRap.h>
 #include <GCodes/GCodeBuffer/GCodeBuffer.h>
@@ -1582,8 +1581,7 @@ static inline bool chol_decompose(double *G, int k) {
 }
 
 static inline void chol_solve(const double *L, int k, const double *b, double *x) {
-	double y[MAX_ANCHORS_INT];
-	memset(y, 0, k * sizeof(double));
+	double y[MAX_ANCHORS_INT] = { 0.0 };
 	for (int i = 0; i < k; ++i) {
 		double s = b[i];
 		for (int p = 0; p < i; ++p) {
@@ -1591,7 +1589,7 @@ static inline void chol_solve(const double *L, int k, const double *b, double *x
 		}
 		y[i] = s / L[i * k + i];
 	}
-	memset(x, 0, k * sizeof(double));
+  std::fill_n(x, k, 0.0);
 	for (int i = k - 1; i >= 0; --i) {
 		double s = y[i];
 		for (int p = i + 1; p < k; ++p) {
@@ -1602,10 +1600,8 @@ static inline void chol_solve(const double *L, int k, const double *b, double *x
 }
 
 static inline void solve_box_ridge_ls(const float *A, int N, const Vec3 &F, double lambda, const double *L, const double *U, int max_iters, double tol, double *T_out) {
-	double H[MAX_ANCHORS_INT * MAX_ANCHORS_INT];
-	double f[MAX_ANCHORS_INT];
-	memset(H, 0, sizeof(H));
-	memset(f, 0, sizeof(f));
+	double H[MAX_ANCHORS_INT * MAX_ANCHORS_INT] = { 0.0 };
+	double f[MAX_ANCHORS_INT] = { 0.0 };
 
 	for (int i = 0; i < N; ++i) {
 		const double aix = A[0 * N + i], aiy = A[1 * N + i], aiz = A[2 * N + i];
@@ -1620,10 +1616,10 @@ static inline void solve_box_ridge_ls(const float *A, int N, const Vec3 &F, doub
 	}
 
 	double Lfull[MAX_ANCHORS_INT * MAX_ANCHORS_INT];
-	memcpy(Lfull, H, N * N * sizeof(double));
+	std::size_t count = static_cast<std::size_t>(N) * N;
+	std::copy_n(H, count, Lfull);
 	chol_decompose(Lfull, N);
-	double t[MAX_ANCHORS_INT];
-	memset(t, 0, sizeof(t));
+	double t[MAX_ANCHORS_INT] = { 0.0 };
 	chol_solve(Lfull, N, f, t);
 	for (int i = 0; i < N; ++i) {
 		double li = L ? L[i] : 0.0;
@@ -1717,12 +1713,9 @@ static inline void solve_box_ridge_ls(const float *A, int N, const Vec3 &F, doub
 			free_idx[free_idx_count++] = best;
 		}
 		const int k = free_idx_count;
-		double Hff[MAX_ANCHORS_INT * MAX_ANCHORS_INT];
-		double gf[MAX_ANCHORS_INT];
-		double pf[MAX_ANCHORS_INT];
-		memset(Hff, 0, sizeof(Hff));
-		memset(gf, 0, sizeof(gf));
-		memset(pf, 0, sizeof(pf));
+		double Hff[MAX_ANCHORS_INT * MAX_ANCHORS_INT] = { 0.0 };
+		double gf[MAX_ANCHORS_INT] = { 0.0 };
+		double pf[MAX_ANCHORS_INT] = { 0.0 };
 
 		for (int p = 0; p < k; ++p) {
 			const int ip = free_idx[p];
@@ -1875,6 +1868,8 @@ void HangprinterKinematics::StaticForcesQp(
 
 	double L[MAX_ANCHORS_INT];
 	double U[MAX_ANCHORS_INT];
+	std::fill_n(L, numAnchors, 0.0);
+	std::fill_n(U, numAnchors, std::numeric_limits<double>::infinity());
 	for (size_t i = 0; i < numAnchors; ++i) {
 		const double li = cfg.ignorePretension ? 0.0 : (cfg.Tmin ? cfg.Tmin[i] : 0.0);
 		double ui = (cfg.Tmax ? cfg.Tmax[i] : std::numeric_limits<double>::infinity());
@@ -1885,7 +1880,7 @@ void HangprinterKinematics::StaticForcesQp(
 		U[i] = ui;
 	}
 
-	double Td[MAX_ANCHORS_INT];
+	double Td[MAX_ANCHORS_INT] = { 0.0 };
 	solve_box_ridge_ls(A, numAnchors, out.requestedForce, cfg.lambda, L, U, cfg.maxItersTarget, cfg.tol, Td);
 
 	for (size_t i = 0; i < numAnchors; ++i) {
