@@ -1554,8 +1554,6 @@ static inline Vec3 applyA(const float* A, int N, const float* T)
 	return Vec3{fx, fy, fz};
 }
 
-static constexpr int MAX_ANCHORS_INT = 8;
-
 static inline bool chol_decompose(double *G, int k) {
 	const double eps = 1e-14;
 	for (int i = 0; i < k; ++i) {
@@ -1581,7 +1579,7 @@ static inline bool chol_decompose(double *G, int k) {
 }
 
 static inline void chol_solve(const double *L, int k, const double *b, double *x) {
-	double y[MAX_ANCHORS_INT] = { 0.0 };
+	double y[HANGPRINTER_MAX_ANCHORS] = { 0.0 };
 	for (int i = 0; i < k; ++i) {
 		double s = b[i];
 		for (int p = 0; p < i; ++p) {
@@ -1600,8 +1598,8 @@ static inline void chol_solve(const double *L, int k, const double *b, double *x
 }
 
 static inline void solve_box_ridge_ls(const float *A, int N, const Vec3 &F, double lambda, const double *L, const double *U, int max_iters, double tol, double *T_out) {
-	double H[MAX_ANCHORS_INT * MAX_ANCHORS_INT] = { 0.0 };
-	double f[MAX_ANCHORS_INT] = { 0.0 };
+	double H[HANGPRINTER_MAX_ANCHORS * HANGPRINTER_MAX_ANCHORS] = { 0.0 };
+	double f[HANGPRINTER_MAX_ANCHORS] = { 0.0 };
 
 	for (int i = 0; i < N; ++i) {
 		const double aix = A[0 * N + i], aiy = A[1 * N + i], aiz = A[2 * N + i];
@@ -1615,11 +1613,11 @@ static inline void solve_box_ridge_ls(const float *A, int N, const Vec3 &F, doub
 		}
 	}
 
-	double Lfull[MAX_ANCHORS_INT * MAX_ANCHORS_INT];
+	double Lfull[HANGPRINTER_MAX_ANCHORS * HANGPRINTER_MAX_ANCHORS];
 	std::size_t count = static_cast<std::size_t>(N) * N;
 	std::copy_n(H, count, Lfull);
 	chol_decompose(Lfull, N);
-	double t[MAX_ANCHORS_INT] = { 0.0 };
+	double t[HANGPRINTER_MAX_ANCHORS] = { 0.0 };
 	chol_solve(Lfull, N, f, t);
 	for (int i = 0; i < N; ++i) {
 		double li = L ? L[i] : 0.0;
@@ -1630,9 +1628,9 @@ static inline void solve_box_ridge_ls(const float *A, int N, const Vec3 &F, doub
 		t[i] = std::min(std::max(t[i], li), ui);
 	}
 
-	int free_idx[MAX_ANCHORS_INT];
+	int free_idx[HANGPRINTER_MAX_ANCHORS];
 	int free_idx_count = 0;
-	double g[MAX_ANCHORS_INT];
+	double g[HANGPRINTER_MAX_ANCHORS];
 
 	auto projected_grad_norm = [&](const double *x) {
 		double s2 = 0.0;
@@ -1713,9 +1711,9 @@ static inline void solve_box_ridge_ls(const float *A, int N, const Vec3 &F, doub
 			free_idx[free_idx_count++] = best;
 		}
 		const int k = free_idx_count;
-		double Hff[MAX_ANCHORS_INT * MAX_ANCHORS_INT] = { 0.0 };
-		double gf[MAX_ANCHORS_INT] = { 0.0 };
-		double pf[MAX_ANCHORS_INT] = { 0.0 };
+		double Hff[HANGPRINTER_MAX_ANCHORS * HANGPRINTER_MAX_ANCHORS] = { 0.0 };
+		double gf[HANGPRINTER_MAX_ANCHORS] = { 0.0 };
+		double pf[HANGPRINTER_MAX_ANCHORS] = { 0.0 };
 
 		for (int p = 0; p < k; ++p) {
 			const int ip = free_idx[p];
@@ -1866,8 +1864,8 @@ void HangprinterKinematics::StaticForcesQp(
 		out.requestedForce = {0.0f, 0.0f, cfg.massKg * cfg.g};
 	}
 
-	double L[MAX_ANCHORS_INT];
-	double U[MAX_ANCHORS_INT];
+	double L[HANGPRINTER_MAX_ANCHORS];
+	double U[HANGPRINTER_MAX_ANCHORS];
 	std::fill_n(L, numAnchors, 0.0);
 	std::fill_n(U, numAnchors, std::numeric_limits<double>::infinity());
 	for (size_t i = 0; i < numAnchors; ++i) {
@@ -1880,7 +1878,7 @@ void HangprinterKinematics::StaticForcesQp(
 		U[i] = ui;
 	}
 
-	double Td[MAX_ANCHORS_INT] = { 0.0 };
+	double Td[HANGPRINTER_MAX_ANCHORS] = { 0.0 };
 	solve_box_ridge_ls(A, numAnchors, out.requestedForce, cfg.lambda, L, U, cfg.maxItersTarget, cfg.tol, Td);
 
 	for (size_t i = 0; i < numAnchors; ++i) {

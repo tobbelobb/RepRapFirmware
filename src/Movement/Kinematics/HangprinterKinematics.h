@@ -21,6 +21,8 @@ enum class HangprinterAnchorMode {
 	AllOnTop, // Result in a prism (speeds get limited, specially going down in Z)
 };
 
+constexpr size_t HANGPRINTER_MAX_ANCHORS = 8;
+
 class HangprinterKinematics : public RoundBedKinematics
 {
 public:
@@ -70,7 +72,6 @@ private:
 
 	// Basic facts about movement system
 	static constexpr const char*_ecv_array ANCHOR_CHARS = "ABCDIJKLO";
-	static constexpr size_t HANGPRINTER_MAX_ANCHORS = 8;
 	static constexpr size_t DefaultNumAnchors = 4;
 
 	// Constructors
