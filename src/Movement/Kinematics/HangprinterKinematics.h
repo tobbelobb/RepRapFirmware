@@ -150,9 +150,9 @@ private:
 		const float mover[3],
 		const StaticForcesConfig &cfg,
 		StaticForcesResult &out) const noexcept;
-	void flexDistances(float const machinePos[3], float const distances[HANGPRINTER_MAX_ANCHORS],
+	void FlexDistances(float const machinePos[3], float const distances[HANGPRINTER_MAX_ANCHORS],
 	                   float flex[HANGPRINTER_MAX_ANCHORS]) const noexcept;
-	void flexDistances(float const machinePos[3],
+	void FlexDistances(float const machinePos[3],
 	                   float flex[HANGPRINTER_MAX_ANCHORS]) const noexcept;
 
 

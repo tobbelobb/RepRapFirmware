@@ -463,7 +463,7 @@ MovementError HangprinterKinematics::CartesianToMotorSteps(const float machinePo
 	if (flexEnabled)
 	{
 		float flex[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
-		flexDistances(machinePos, distances, flex);
+		FlexDistances(machinePos, distances, flex);
 		for (size_t i = 0; i < numAnchors; ++i)
 		{
 			linePos[i] = distances[i] - distancesOrigin[i] + flex[i];
@@ -505,18 +505,18 @@ inline float HangprinterKinematics::MotorPosToLinePos(const int32_t motorPos, si
 }
 
 
-void HangprinterKinematics::flexDistances(float const machinePos[3],
+void HangprinterKinematics::FlexDistances(float const machinePos[3],
                                           float flex[HANGPRINTER_MAX_ANCHORS]) const noexcept {
 	float distances[HANGPRINTER_MAX_ANCHORS];
 	for (size_t i = 0; i < numAnchors; ++i)
 	{
 		distances[i] = hyp3(machinePos, anchors[i]);
 	}
-	flexDistances(machinePos, distances, flex);
+	FlexDistances(machinePos, distances, flex);
 }
 
 
-void HangprinterKinematics::flexDistances(float const machinePos[3], float const distances[HANGPRINTER_MAX_ANCHORS],
+void HangprinterKinematics::FlexDistances(float const machinePos[3], float const distances[HANGPRINTER_MAX_ANCHORS],
                                           float flex[HANGPRINTER_MAX_ANCHORS]) const noexcept {
 	float springKs[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	for (size_t i = 0; i < numAnchors; ++i) {
@@ -544,14 +544,14 @@ float HangprinterKinematics::ResidualsAndDerivatives(
 	constexpr float impactStep = 1e-3F;
 
 	if (flexEnabled) {
-		flexDistances(pos, baseImpact);
+		FlexDistances(pos, baseImpact);
 		for (size_t axis = 0; axis < 3; ++axis) {
 			float shifted[3] = { pos[0], pos[1], pos[2] };
 			shifted[axis] += impactStep;
-			flexDistances(shifted, impactPlus[axis]);
+			FlexDistances(shifted, impactPlus[axis]);
 			shifted[axis] = pos[axis];
 			shifted[axis] -= impactStep;
-			flexDistances(shifted, impactMinus[axis]);
+			FlexDistances(shifted, impactMinus[axis]);
 		}
 	}
 
