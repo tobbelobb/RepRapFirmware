@@ -119,7 +119,6 @@ private:
 	float stepsPerMmAtOrigin[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	bool useConstantSpoolModel[HANGPRINTER_MAX_ANCHORS] = { false };
 	float distancesOrigin[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
-	float fOrigin[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	float printRadiusSquared = 0.0F;
 
 	float SpringK(float const springLength) const noexcept;

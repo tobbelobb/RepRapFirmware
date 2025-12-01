@@ -155,7 +155,7 @@ void HangprinterKinematics::Recalc() noexcept
 	// "line length" == ("line position" + "line length in origin")
 	for (size_t i = 0; i < numAnchors; ++i)
 	{
-		distancesOrigin[i] = fastSqrtf(fsquare(anchors[i][0]) + fsquare(anchors[i][1]) + fsquare(anchors[i][2]));
+		distancesOrigin[i] = norm(anchors[i]);
 	}
 
 	//// Line buildup compensation
@@ -1825,9 +1825,6 @@ void HangprinterKinematics::StaticForcesTikhonov(
 			}
 			if (cfg.Tmax && T[i] > cfg.Tmax[i]) {
 				T[i] = cfg.Tmax[i];
-			}
-			if (cfg.Tmin && T[i] < cfg.Tmin[i]) {
-				T[i] = cfg.Tmin[i];
 			}
 		}
 	}
