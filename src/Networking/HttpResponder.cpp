@@ -84,6 +84,58 @@ template <size_t Len> void TrimTrailingNewlines(String<Len>& value) noexcept
 		}
 	}
 }
+
+template <size_t Len> void DecodeUrlEncoded(String<Len>& value) noexcept
+{
+	auto hex = [](char c) noexcept -> int
+	{
+		if (c >= '0' && c <= '9')
+		{
+			return c - '0';
+		}
+		if (c >= 'A' && c <= 'F')
+		{
+			return 10 + (c - 'A');
+		}
+		if (c >= 'a' && c <= 'f')
+		{
+			return 10 + (c - 'a');
+		}
+		return -1;
+	};
+
+	const size_t length = value.strlen();
+	size_t readPos = 0;
+	size_t writePos = 0;
+	while (readPos < length)
+	{
+		const char c = value[readPos];
+		if (c == '+')
+		{
+			value[writePos++] = ' ';
+		}
+		else if (c == '%' && readPos + 2 < length)
+		{
+			const int hi = hex(value[readPos + 1]);
+			const int lo = hex(value[readPos + 2]);
+			if (hi >= 0 && lo >= 0)
+			{
+				value[writePos++] = (char)((hi << 4) | lo);
+				readPos += 2;
+			}
+			else
+			{
+				value[writePos++] = c;
+			}
+		}
+		else
+		{
+			value[writePos++] = c;
+		}
+		++readPos;
+	}
+	value.Truncate(writePos);
+}
 #endif
 
 HttpResponder::HttpResponder(NetworkResponder *_ecv_from _ecv_null n) noexcept : UploadingNetworkResponder(n)
@@ -598,7 +650,7 @@ bool HttpResponder::GetJsonResponse(const char *_ecv_array request, OutputBuffer
 		}
 		else
 		{
-			response->printf("{\"buff\":%u}", httpInput->BufferSpaceLeft());
+			response->printf("{\"buff\":%zu}", httpInput->BufferSpaceLeft());
 		}
 	}
 #if HAS_MASS_STORAGE
@@ -792,7 +844,7 @@ bool HttpResponder::SendFileInfo(bool quitEarly) noexcept
 						"Expires: 0\r\n"
 						"Content-Type: application/json\r\n"
 					);
-		outBuf->catf("Content-Length: %u\r\n", (jsonResponse != nullptr) ? jsonResponse->Length() : 0);
+		outBuf->catf("Content-Length: %zu\r\n", (jsonResponse != nullptr) ? jsonResponse->Length() : 0);
 		AddCorsHeader();
 		outBuf->cat("Connection: close\r\n\r\n");
 		outBuf->Append(jsonResponse);
@@ -1059,7 +1111,7 @@ void HttpResponder::SendFile(const char *_ecv_array nameOfFileToSend, bool isWeb
 		outBuf->cat("Content-Encoding: gzip\r\n");
 	}
 
-	outBuf->catf("Content-Length: %lu\r\n", fileToSend->Length());
+	outBuf->catf("Content-Length: %u\r\n", fileToSend->Length());
 	outBuf->cat("Connection: close\r\n\r\n");
 	Commit();
 #else
@@ -1091,7 +1143,7 @@ void HttpResponder::SendGCodeReply() noexcept
 
 			if (reprap.Debug(Module::Webserver))
 			{
-				GetPlatform().MessageF(UsbMessage, "Sending G-Code reply to HTTP client %d of %d (length %u)\n", clientsServed, numSessions, gcodeReply.DataLength());
+				GetPlatform().MessageF(UsbMessage, "Sending G-Code reply to HTTP client %d of %d (length %zu)\n", clientsServed, numSessions, gcodeReply.DataLength());
 			}
 		}
 
@@ -1102,7 +1154,7 @@ void HttpResponder::SendGCodeReply() noexcept
 						"Expires: 0\r\n"
 						"Content-Type: text/plain\r\n"
 					);
-		outBuf->catf("Content-Length: %u\r\n", gcodeReply.DataLength());
+		outBuf->catf("Content-Length: %zu\r\n", gcodeReply.DataLength());
 		AddCorsHeader();
 		outBuf->cat("Connection: close\r\n\r\n");
 		outStack.Append(gcodeReply);
@@ -1376,14 +1428,23 @@ void HttpResponder::ProcessRequest() noexcept
 				if ((command == nullptr || command[0] == 0) && numQualKeys < MaxQualKeys)
 				{
 					const char *_ecv_array const contentType = GetHeaderValue("Content-Type");
-					if (contentType == nullptr || StringStartsWith(contentType, "text/plain"))
+					const bool isFormEncoded =
+						(contentType != nullptr) && StringStartsWith(contentType, "application/x-www-form-urlencoded");
+					const bool allowPlainBody =
+						(contentType == nullptr)
+						|| StringStartsWith(contentType, "text/plain")
+						|| isFormEncoded;
+
+					if (allowPlainBody && readPlainCommand(plainCommand))
 					{
-						if (readPlainCommand(plainCommand))
+						if (isFormEncoded && StringStartsWith(plainCommand.c_str(), "gcode="))
 						{
-							qualifiers[numQualKeys].key = "gcode";
-							qualifiers[numQualKeys].value = plainCommand.c_str();
-							++numQualKeys;
+							plainCommand.Erase(0, 6);
+							DecodeUrlEncoded(plainCommand);
 						}
+						qualifiers[numQualKeys].key = "gcode";
+						qualifiers[numQualKeys].value = plainCommand.c_str();
+						++numQualKeys;
 					}
 				}
 
@@ -1451,7 +1512,7 @@ void HttpResponder::ProcessRequest() noexcept
 
 					if (reprap.Debug(Module::Webserver))
 					{
-						GetPlatform().MessageF(UsbMessage, "Start uploading file %s length %lu\n", filename, postFileLength);
+						GetPlatform().MessageF(UsbMessage, "Start uploading file %s length %u\n", filename, postFileLength);
 					}
 					uploadedBytes = 0;
 
@@ -1753,7 +1814,7 @@ void HttpResponder::Diagnostics(const StringRef& reply) const noexcept
 
 /*static*/ void HttpResponder::CommonDiagnostics(const StringRef& reply) noexcept
 {
-	reply.lcatf("HTTP sessions: %u of %u", numSessions, MaxHttpSessions);
+	reply.lcatf("HTTP sessions: %u of %lu", numSessions, MaxHttpSessions);
 }
 
 void HttpResponder::AddCorsHeader() noexcept
