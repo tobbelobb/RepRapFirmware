@@ -9,6 +9,10 @@
 #include "Socket.h"
 #include <Platform/Platform.h>
 
+#if HAS_MASS_STORAGE
+# include <Storage/MassStorage.h>
+#endif
+
 UploadingNetworkResponder::UploadingNetworkResponder(NetworkResponder *_ecv_from _ecv_null n) noexcept : NetworkResponder(n)
 #if HAS_MASS_STORAGE
 	, uploadError(false), dummyUpload(false)
