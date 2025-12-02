@@ -14,6 +14,9 @@
 #include "GCodes/GCodes.h"
 #include "General/IP4String.h"
 #include <cstring>
+#if RRF_HOST_BUILD
+# include <HostIdle.h>
+#endif
 
 #define KO_START "rr_"
 const size_t KoFirst = 3;
@@ -1329,6 +1332,7 @@ void HttpResponder::ProcessRequest() noexcept
 	if (hostMachineCode || PathMatchesMachineEndpoint(commandWords[1], "/machine/model"))
 	{
 		commandWords[1] = (hostMachineCode) ? KO_START "gcode" : KO_START "model";
+		HostIdle::SetServerIdle(false);
 	}
 #endif
 
