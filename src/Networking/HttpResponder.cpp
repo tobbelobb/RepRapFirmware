@@ -14,8 +14,10 @@
 #include "GCodes/GCodes.h"
 #include "General/IP4String.h"
 #include <cstring>
+#include <string>
 #if RRF_HOST_BUILD
 # include <HostIdle.h>
+# include <GCodeInjector.h>
 #endif
 
 #define KO_START "rr_"
@@ -1450,6 +1452,55 @@ void HttpResponder::ProcessRequest() noexcept
 						qualifiers[numQualKeys].value = plainCommand.c_str();
 						++numQualKeys;
 					}
+				}
+
+				if (hostMachineCode)
+				{
+					auto sendError = [&](const char* message)
+					{
+						const size_t messageLen = strlen(message);
+						outBuf->copy("HTTP/1.1 400 Bad Request\r\n"
+									 "Content-Type: text/plain\r\n"
+									 "Cache-Control: no-cache, no-store, must-revalidate\r\n"
+									 "Pragma: no-cache\r\n"
+									 "Expires: 0\r\n");
+						outBuf->catf("Content-Length: %u\r\n", static_cast<unsigned int>(messageLen));
+						AddCorsHeader();
+						outBuf->cat("Connection: close\r\n\r\n");
+						outBuf->cat(message);
+						Commit();
+					};
+
+					const char *_ecv_array const gcodeValue = GetKeyValue("gcode");
+					if (gcodeValue == nullptr || gcodeValue[0] == 0)
+					{
+						sendError("Error: Empty G-code");
+						return;
+					}
+
+					std::string trimmed = gcodeValue;
+					const auto first = trimmed.find_first_not_of(" \t\r\n");
+					const auto last = trimmed.find_last_not_of(" \t\r\n");
+					if (first == std::string::npos)
+					{
+						sendError("Error: Empty G-code");
+						return;
+					}
+					trimmed = trimmed.substr(first, last - first + 1);
+
+					const std::string response = GCodeInjector::Instance().ExecuteBlocking(trimmed);
+
+					outBuf->copy("HTTP/1.1 200 OK\r\n"
+								 "Cache-Control: no-cache, no-store, must-revalidate\r\n"
+								 "Pragma: no-cache\r\n"
+								 "Expires: 0\r\n"
+								 "Content-Type: text/plain\r\n");
+					outBuf->catf("Content-Length: %u\r\n", static_cast<unsigned int>(response.size()));
+					AddCorsHeader();
+					outBuf->cat("Connection: close\r\n\r\n");
+					outBuf->cat(response.c_str());
+					Commit();
+					return;
 				}
 
 				SendJsonResponse("gcode");

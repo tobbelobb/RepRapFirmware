@@ -43,6 +43,7 @@
 
 #if RRF_HOST_BUILD
 # include <HostTiming.h>
+# include <GCodeInjector.h>
 #endif
 
 #if HAS_SBC_INTERFACE
@@ -4108,6 +4109,13 @@ void GCodes::HandleReply(GCodeBuffer& gb, GCodeResult rslt, const char *_ecv_arr
 // Note that 'reply' may be empty. If it isn't, then we need to append newline when sending it.
 void GCodes::HandleReplyPreserveResult(GCodeBuffer& gb, GCodeResult rslt, const char *_ecv_array reply) noexcept
 {
+#if RRF_HOST_BUILD
+	if (gb.GetChannel() == GCodeChannel::HTTP)
+	{
+		GCodeInjector::Instance().OnResponse(reply);
+	}
+#endif
+
 #if HAS_SBC_INTERFACE
 	// Deal with replies to the SBC
 	if (gb.LatestMachineState().lastCodeFromSbc || (gb.GetCommandLetter() == 'M' && gb.GetCommandNumber() == 121))
