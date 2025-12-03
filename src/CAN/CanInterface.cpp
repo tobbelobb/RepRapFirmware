@@ -28,6 +28,9 @@
 #include <GCodes/GCodeBuffer/GCodeBuffer.h>
 #include <ClosedLoop/ClosedLoop.h>
 #include <AppNotifyIndices.h>
+#if RRF_HOST_BUILD
+# include <HostTorqueMode.h>
+#endif
 
 #if HAS_SBC_INTERFACE
 # include "SBC/SbcInterface.h"
@@ -1069,7 +1072,21 @@ pre(driver.IsRemote())
 				return cons.SendAndGetResponse(CanMessageType::m569p4, driver.boardAddress, reply);
 			}
 		}
-#if DUAL_CAN
+
+#if RRF_HOST_BUILD
+		{
+			if (!gb.Seen('T'))
+			{
+				reply.copy("Error: M569.4 missing parameter 'T'");
+				return GCodeResult::error;
+			}
+
+			const float torque = gb.GetFValue();
+			const char *const response = HostTorqueMode::Instance().SetTorqueMode(driver.boardAddress, torque);
+			reply.cat(response);
+			return GCodeResult::ok;
+		}
+#elif DUAL_CAN
 		{
 			Kinematics& kin = reprap.GetMove().GetKinematics();
 			if (kin.GetLegacyType() == KinematicsType::hangprinter)
