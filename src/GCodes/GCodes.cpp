@@ -43,7 +43,7 @@
 
 #if RRF_HOST_BUILD
 # include <HostTiming.h>
-# include <GCodeInjector.h>
+# include <src/GCodeInjector.h>
 #endif
 
 #if HAS_SBC_INTERFACE

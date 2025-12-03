@@ -14,10 +14,10 @@
 #include "GCodes/GCodes.h"
 #include "General/IP4String.h"
 #include <cstring>
-#include <string>
 #if RRF_HOST_BUILD
 # include <HostIdle.h>
-# include <GCodeInjector.h>
+# include <string>
+# include <src/GCodeInjector.h>
 #endif
 
 #define KO_START "rr_"
