@@ -1190,8 +1190,8 @@ GCodeResult Move::ConfigureLocalDriverBasicParameters(GCodeBuffer& gb, const Str
 void Move::ReportM569Parameters(size_t drive, const StringRef& reply) noexcept
 {
 	// Print the basic parameters common to all types of driver
-	reply.printf("Drive %zu runs %s, active %s enable",
-					drive,
+	reply.printf("Drive %u runs %s, active %s enable",
+					(unsigned int)drive,
 					(GetDirectionValue(drive)) ? "forwards" : "in reverse",
 					(GetEnableValue(drive) > 0) ? "high" : "low");
 #if SUPPORT_SLOW_DRIVERS
