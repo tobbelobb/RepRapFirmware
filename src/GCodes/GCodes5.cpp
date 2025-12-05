@@ -105,7 +105,7 @@ GCodeResult GCodes::SelectMovementQueue(GCodeBuffer& gb, const StringRef& reply)
 	}
 	else
 	{
-		reply.printf("Motion system %u is active", gb.GetActiveQueueNumber());
+		reply.printf("Motion system %zu is active", gb.GetActiveQueueNumber());
 	}
 	return GCodeResult::ok;
 }

@@ -1438,7 +1438,7 @@ void GCodes::SaveResumeInfo(bool wasPowerFailure) noexcept
 				// Select each motion system in turn and write its settings
 				for (size_t i = 0; ok && i < NumMovementSystems; ++i)
 				{
-					buf.printf("M596 P%u\n", i);
+					buf.printf("M596 P%zu\n", i);
 					ok = f->Write(buf.c_str()) && SaveMoveStateResumeInfo(moveStates[i], f, printingFilename, buf.GetRef());
 				}
 
