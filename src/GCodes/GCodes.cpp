@@ -42,7 +42,6 @@
 #include <ObjectModel/Variable.h>
 
 #if RRF_HOST_BUILD
-# include <cstdio>
 # include <HostTiming.h>
 # include <src/GCodeInjector.h>
 #endif
@@ -1758,31 +1757,12 @@ bool GCodes::LockMovementSystemAndWaitForStandstill(GCodeBuffer& gb, MovementSys
 	// Lock movement to stop another source adding moves to the queue
 	if (!LockResource(gb, MoveResourceBase + msNumber))
 	{
-#if RRF_HOST_BUILD
-		static uint32_t lastLockBusyLog = 0;
-		const uint32_t now = millis();
-		if (now - lastLockBusyLog > 1000)
-		{
-			lastLockBusyLog = now;
-			fprintf(stderr, "LockWait: movement resource busy for channel %u ms=%u\n",
-					(unsigned)gb.GetChannel().ToBaseType(), (unsigned)msNumber);
-		}
-#endif
 		return false;
 	}
 
 	MovementState& ms = moveStates[msNumber];
 	if (ms.segmentsLeft != 0)						// has the last move generated been fully transferred to the movement queue?
 	{
-#if RRF_HOST_BUILD
-		static uint32_t lastSegLog = 0;
-		const uint32_t now = millis();
-		if (now - lastSegLog > 1000)
-		{
-			lastSegLog = now;
-			fprintf(stderr, "LockWait: segmentsLeft=%u totalSeg=%u\n", ms.segmentsLeft, ms.totalSegments);
-		}
-#endif
 		return false;								// if no
 	}
 
@@ -1794,51 +1774,24 @@ bool GCodes::LockMovementSystemAndWaitForStandstill(GCodeBuffer& gb, MovementSys
 		break;
 
 	default:
-		const bool waiting = move.WaitingForAllMovesFinished(msNumber
+		if (!move.WaitingForAllMovesFinished(msNumber
 #if SUPPORT_ASYNC_MOVES
 															, ms.logicalDrivesOwned
 #endif
-														);
-		if (!waiting)
+														)
+		   )
 		{
-#if RRF_HOST_BUILD
-			static uint32_t lastLockLog = 0;
-			const uint32_t now = millis();
-			if (now - lastLockLog > 1000)
-			{
-				lastLockLog = now;
-				fprintf(stderr, "LockWait: waiting=%d segLeft=%u sched=%u comp=%u\n",
-						waiting, ms.segmentsLeft, move.GetScheduledMoves(), move.GetCompletedMoves());
-			}
-#endif
 			return false;
 		}
 
-		const bool queuesIdle = (
+		if (!(
 #if SUPPORT_ASYNC_MOVES
 				((msNumber == 1) ? Queue2GCode() : QueuedGCode())
 #else
 				QueuedGCode()
 #endif
-							->IsIdle() && ms.codeQueue->IsIdle());
-		if (!queuesIdle)
+							->IsIdle() && ms.codeQueue->IsIdle()))
 		{
-#if RRF_HOST_BUILD
-			static uint32_t lastQueueLog = 0;
-			const uint32_t now = millis();
-			if (now - lastQueueLog > 1000)
-			{
-				lastQueueLog = now;
-				debugPrintf("LockWait queues: queuesIdle=%d codeQueueIdle=%d queuedIdle=%d segLeft=%u\n",
-							queuesIdle, ms.codeQueue->IsIdle(),
-#if SUPPORT_ASYNC_MOVES
-							((msNumber == 1) ? Queue2GCode() : QueuedGCode())->IsIdle(),
-#else
-					QueuedGCode()->IsIdle(),
-#endif
-							ms.segmentsLeft);
-			}
-#endif
 			return false;
 		}
 		break;
