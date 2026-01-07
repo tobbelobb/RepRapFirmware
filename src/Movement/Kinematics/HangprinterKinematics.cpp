@@ -900,6 +900,14 @@ float HangprinterKinematics::GetEndstopPosition(size_t drive, bool highEnd) noex
 	return Kinematics::GetEndstopPosition(drive, highEnd);
 }
 
+// Return the drivers that control an axis or anchor line
+LogicalDrivesBitmap HangprinterKinematics::GetControllingDrives(size_t axis, bool forHoming) const noexcept
+{
+	return (forHoming || axis >= numAnchors)
+			? LogicalDrivesBitmap::MakeFromBits(axis)
+				: LogicalDrivesBitmap::MakeLowestNBits(numAnchors);
+}
+
 // Return the axes that we can assume are homed after executing a G92 command to set the specified axis coordinates
 AxesBitmap HangprinterKinematics::AxesAssumedHomed(AxesBitmap g92Axes) const noexcept
 {
