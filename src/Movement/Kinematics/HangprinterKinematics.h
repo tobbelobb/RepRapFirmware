@@ -57,6 +57,8 @@ public:
 																					uint32_t setSpoolGearTeeth[] _ecv_null = nullptr, uint32_t setMotorGearTeeth[] _ecv_null = nullptr,
 																					float setSpoolRadii[] _ecv_null = nullptr) noexcept;
 #endif
+	GCodeResult ComputeODrive3TorqueFromForce(DriverId driver, float force_Newton, float& motorTorque_Nm,
+																					bool& positionMode, const StringRef& reply) const noexcept;
 
 protected:
 	DECLARE_OBJECT_MODEL_WITH_ARRAYS

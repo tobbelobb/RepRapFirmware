@@ -1073,20 +1073,7 @@ pre(driver.IsRemote())
 			}
 		}
 
-#if RRF_HOST_BUILD
-		{
-			if (!gb.Seen('T'))
-			{
-				reply.copy("Error: M569.4 missing parameter 'T'");
-				return GCodeResult::error;
-			}
-
-			const float torque = gb.GetFValue();
-			const char *const response = HostTorqueMode::Instance().SetTorqueMode(driver.boardAddress, torque);
-			reply.cat(response);
-			return GCodeResult::ok;
-		}
-#elif DUAL_CAN
+#if DUAL_CAN
 		{
 			Kinematics& kin = reprap.GetMove().GetKinematics();
 			if (kin.GetLegacyType() == KinematicsType::hangprinter)

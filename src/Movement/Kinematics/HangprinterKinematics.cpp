@@ -1249,6 +1249,51 @@ GCodeResult HangprinterKinematics::ReadODrive3Encoder(DriverId const driver, GCo
 }
 #endif // DUAL_CAN
 
+namespace {
+GCodeResult ComputeODrive3TorqueFromForceInternal(
+	DriverId const driver, float const force_Newton,
+	uint32_t const mechanicalAdvantage[], uint32_t const spoolGearTeeth[], uint32_t const motorGearTeeth[],
+	float const spoolRadii[], float& motorTorque_Nm, bool& positionMode, const StringRef& reply) noexcept
+{
+	constexpr float MIN_TORQUE_N = 0.001F;
+	positionMode = false;
+	motorTorque_Nm = 0.0F;
+	if (fabsf(force_Newton) < MIN_TORQUE_N)
+	{
+		positionMode = true;
+		return GCodeResult::ok;
+	}
+
+	const int boardIndex = (int)driver.boardAddress - 40;
+	if (boardIndex < 0 || boardIndex > 3)
+	{
+		reply.catf("Board address not between 40 and 43: %d", driver.boardAddress);
+		return GCodeResult::error;
+	}
+
+	float const lineTension_N = force_Newton / mechanicalAdvantage[boardIndex];
+	float const spoolTorque_Nm = lineTension_N * spoolRadii[boardIndex] * 0.001F;
+	float motorTorque = spoolTorque_Nm * motorGearTeeth[boardIndex] / spoolGearTeeth[boardIndex];
+	motorTorque = std::abs(motorTorque);
+	if (driver.boardAddress == 40 || driver.boardAddress == 41) // Driver direction is not stored on main board!! (will be in the future)
+	{
+		motorTorque = -motorTorque;
+	}
+	motorTorque_Nm = motorTorque;
+	return GCodeResult::ok;
+}
+} // namespace
+
+GCodeResult HangprinterKinematics::ComputeODrive3TorqueFromForce(DriverId const driver, float force_Newton,
+																																	float& motorTorque_Nm, bool& positionMode,
+																																	const StringRef& reply) const noexcept
+{
+	return ComputeODrive3TorqueFromForceInternal(
+		driver, force_Newton,
+		mechanicalAdvantage, spoolGearTeeth, motorGearTeeth, spoolRadii,
+		motorTorque_Nm, positionMode, reply);
+}
+
 #if DUAL_CAN
 GCodeResult HangprinterKinematics::SetODrive3TorqueModeInner(DriverId const driver, float const torque_Nm, const StringRef& reply) noexcept
 {
@@ -1333,38 +1378,31 @@ GCodeResult HangprinterKinematics::SetODrive3TorqueMode(DriverId const driver, f
 		return GCodeResult::ok;
 	}
 
-	GCodeResult res = GCodeResult::ok;
-	constexpr float MIN_TORQUE_N = 0.001;
-	if (fabsf(force_Newton) < MIN_TORQUE_N)
+	float motorTorque_Nm = 0.0F;
+	bool positionMode = false;
+	GCodeResult res = ComputeODrive3TorqueFromForceInternal(
+		driver, force_Newton,
+		mechanicalAdvantage_, spoolGearTeeth_, motorGearTeeth_, spoolRadii_,
+		motorTorque_Nm, positionMode, reply);
+	if (res != GCodeResult::ok)
+	{
+		return res;
+	}
+
+	if (positionMode)
 	{
 		res = SetODrive3PosMode(driver, reply);
 		if (res == GCodeResult::ok)
 		{
 			reply.cat("pos_mode, ");
 		}
+		return res;
 	}
-	else
-	{
-		size_t const boardIndex = driver.boardAddress - 40;
-		if (boardIndex < 0 or boardIndex > 3) {
-			reply.catf("Board address not between 40 and 43: %d", driver.boardAddress);
-			return GCodeResult::error;
-		}
 
-		float const lineTension_N = force_Newton / mechanicalAdvantage_[boardIndex];
-		float const spoolTorque_Nm = lineTension_N * spoolRadii_[boardIndex] * 0.001;
-		float motorTorque_Nm = spoolTorque_Nm * motorGearTeeth_[boardIndex] / spoolGearTeeth_[boardIndex];
-		// Set the right sign
-		motorTorque_Nm = std::abs(motorTorque_Nm);
-		if (driver.boardAddress == 40 || driver.boardAddress == 41) // Driver direction is not stored on main board!! (will be in the future)
-		{
-			motorTorque_Nm = -motorTorque_Nm;
-		}
-		res = SetODrive3TorqueModeInner(driver, motorTorque_Nm, reply);
-		if (res == GCodeResult::ok)
-		{
-			reply.catf("%.6f Nm, ", (double)motorTorque_Nm);
-		}
+	res = SetODrive3TorqueModeInner(driver, motorTorque_Nm, reply);
+	if (res == GCodeResult::ok)
+	{
+		reply.catf("%.6f Nm, ", (double)motorTorque_Nm);
 	}
 	return res;
 }
