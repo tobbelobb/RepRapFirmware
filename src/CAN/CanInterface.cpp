@@ -1020,9 +1020,21 @@ pre(driver.IsRemote())
 			}
 		}
 		{
+			bool hasDirection = false;
+			int32_t directionValue = 0;
+			if (gb.Seen('S'))
+			{
+				hasDirection = true;
+				directionValue = gb.GetIValue();
+			}
 			CanMessageGenericConstructor cons(M569Params);
 			cons.PopulateFromCommand(gb);
-			return cons.SendAndGetResponse(CanMessageType::m569, driver.boardAddress, reply);
+			const GCodeResult rslt = cons.SendAndGetResponse(CanMessageType::m569, driver.boardAddress, reply);
+			if (rslt == GCodeResult::ok && hasDirection)
+			{
+				reprap.GetExpansion().SetDriverDirection(driver.boardAddress, driver.localDriver, directionValue != 0);
+			}
+			return rslt;
 		}
 
 	case 1:

@@ -319,6 +319,36 @@ void ExpansionManager::ProcessDriveStatusReport(const CanMessageBuffer *buf) noe
 	}
 }
 
+void ExpansionManager::SetDriverDirection(CanAddress address, uint8_t driver, bool forwards) noexcept
+{
+	if (address > CanId::MaxCanAddress || driver >= MaxLinearDriversPerCanSlave)
+	{
+		return;
+	}
+
+	WriteLocker lock(boardsLock);
+	ExpansionBoardData& board = boards[address];
+	board.driverDirectionIsForwards[driver] = forwards;
+	board.driverDirectionKnown[driver] = true;
+}
+
+bool ExpansionManager::TryGetDriverDirection(CanAddress address, uint8_t driver, bool& forwards) const noexcept
+{
+	if (address > CanId::MaxCanAddress || driver >= MaxLinearDriversPerCanSlave)
+	{
+		return false;
+	}
+
+	ReadLocker lock(boardsLock);
+	const ExpansionBoardData& board = boards[address];
+	if (!board.driverDirectionKnown[driver])
+	{
+		return false;
+	}
+	forwards = board.driverDirectionIsForwards[driver];
+	return true;
+}
+
 // Return a pointer to the expansion board, if it is present
 const ExpansionBoardData *ExpansionManager::GetBoardDetails(uint8_t address) const noexcept
 {

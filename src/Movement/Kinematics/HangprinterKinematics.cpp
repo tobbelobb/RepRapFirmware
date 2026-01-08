@@ -1194,6 +1194,33 @@ HangprinterKinematics::ODriveAnswer HangprinterKinematics::GetODrive3EncoderEsti
 #endif // DUAL_CAN
 
 #if DUAL_CAN
+namespace
+{
+bool TryGetDriverDirectionForwards(DriverId driver, bool& forwards) noexcept
+{
+#if SUPPORT_CAN_EXPANSION
+	if (driver.IsLocal())
+	{
+		const Move& move = reprap.GetMove();
+		if (driver.localDriver < move.GetNumActualDirectDrivers())
+		{
+			forwards = move.GetDirectionValue(driver.localDriver);
+			return true;
+		}
+		return false;
+	}
+
+	return reprap.GetExpansion().TryGetDriverDirection(driver.boardAddress, driver.localDriver, forwards);
+#else
+	(void)driver;
+	(void)forwards;
+	return false;
+#endif
+}
+}
+#endif // DUAL_CAN
+
+#if DUAL_CAN
 GCodeResult HangprinterKinematics::ReadODrive3AxisForce(DriverId const driver, const StringRef& reply, float setTorqueConstants[], uint32_t setMechanicalAdvantage[], uint32_t setSpoolGearTeeth[], uint32_t setMotorGearTeeth[], float setSpoolRadii[]) THROWS(GCodeException)
 {
 	static float torqueConstants_[HANGPRINTER_MAX_ANCHORS] = { 0.0 };
@@ -1226,7 +1253,8 @@ GCodeResult HangprinterKinematics::ReadODrive3AxisForce(DriverId const driver, c
 		// the exact same line buildup on spool as we have at the origin,
 		// and no losses from any of the bearings or eyelets in the motion system.
 		float motorTorque_Nm = motorCurrent.value * torqueConstants_[boardIndex];
-		if (driver.boardAddress == 40 || driver.boardAddress == 41) // Driver direction is not stored on main board!! (will be in the future)
+		bool directionForwards = true;
+		if (TryGetDriverDirectionForwards(driver, directionForwards) && directionForwards)
 		{
 			motorTorque_Nm = -motorTorque_Nm;
 		}
@@ -1246,9 +1274,10 @@ GCodeResult HangprinterKinematics::ReadODrive3Encoder(DriverId const driver, GCo
 	if (estimate.valid)
 	{
 		float directionCorrectedEncoderValue = estimate.value;
-		if (driver.boardAddress == 42 || driver.boardAddress == 43) // Driver direction is not stored on main board!! (will be in the future)
+		bool directionForwards = true;
+		if (TryGetDriverDirectionForwards(driver, directionForwards) && !directionForwards)
 		{
-			directionCorrectedEncoderValue *= -1.0;
+			directionCorrectedEncoderValue *= -1.0F;
 		}
 		reply.catf("%.2f, ", (double)(directionCorrectedEncoderValue * 360.0));
 		return GCodeResult::ok;
@@ -1283,7 +1312,8 @@ GCodeResult ComputeODrive3TorqueFromForceInternal(
 	float const spoolTorque_Nm = lineTension_N * spoolRadii[boardIndex] * 0.001F;
 	float motorTorque = spoolTorque_Nm * motorGearTeeth[boardIndex] / spoolGearTeeth[boardIndex];
 	motorTorque = std::abs(motorTorque);
-	if (driver.boardAddress == 40 || driver.boardAddress == 41) // Driver direction is not stored on main board!! (will be in the future)
+	bool directionForwards = true;
+	if (TryGetDriverDirectionForwards(driver, directionForwards) && directionForwards)
 	{
 		motorTorque = -motorTorque;
 	}
