@@ -1090,9 +1090,36 @@ pre(driver.IsRemote())
 			Kinematics& kin = reprap.GetMove().GetKinematics();
 			if (kin.GetLegacyType() == KinematicsType::hangprinter)
 			{
+				gb.MustSee('P');
+				size_t drivesCount = reprap.GetGCodes().GetVisibleAxes();
+				DriverId driverIds[drivesCount];
+				gb.GetDriverIdArray(driverIds, drivesCount);
+
 				gb.MustSee('T');
-				const float torque = gb.GetFValue();
-				return ((HangprinterKinematics&)kin).SetODrive3TorqueMode(driver, torque, reply);
+				float forces[drivesCount];
+				size_t forceCount = drivesCount;
+				gb.GetFloatArray(forces, forceCount, true);
+				if (forceCount != drivesCount)
+				{
+					reply.copy("M569.4 requires one T value per P");
+					return GCodeResult::error;
+				}
+
+				size_t driverIndex = drivesCount;
+				for (size_t i = 0; i < drivesCount; ++i)
+				{
+					if (driverIds[i] == driver)
+					{
+						driverIndex = i;
+						break;
+					}
+				}
+				if (driverIndex == drivesCount)
+				{
+					reply.copy("M569.4 driver not found in P list");
+					return GCodeResult::error;
+				}
+				return ((HangprinterKinematics&)kin).SetODrive3TorqueMode(driver, forces[driverIndex], reply);
 			}
 		}
 #endif
