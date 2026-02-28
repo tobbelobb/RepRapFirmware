@@ -1699,7 +1699,7 @@ static inline void solve_box_ridge_ls(const float *A, int N, const float F[3], d
 		if (ui < li) {
 			ui = li;
 		}
-		t[i] = std::min(std::max(t[i], li), ui);
+		t[i] = min(max(t[i], li), ui);
 	}
 
 	int free_idx[HANGPRINTER_MAX_ANCHORS];
@@ -1772,10 +1772,10 @@ static inline void solve_box_ridge_ls(const float *A, int N, const float F[3], d
 				const bool atU = (t[i] >= ui - 1e-12);
 				double viol = 0.0;
 				if (atL) {
-					viol = std::max(0.0, -g[i]);
+					viol = max((double)0.0, -g[i]);
 				}
 				if (atU) {
-					viol = std::max(viol, g[i]);
+					viol = max(viol, g[i]);
 				}
 				if (viol > bestViol) {
 					bestViol = viol;
@@ -1817,12 +1817,12 @@ static inline void solve_box_ridge_ls(const float *A, int N, const float F[3], d
 			if (pi > 0.0) {
 				const double amax = (ui - t[i]) / pi;
 				if (amax < alpha) {
-					alpha = std::max(0.0, amax);
+					alpha = max((double)0.0, amax);
 				}
 			} else {
 				const double amax = (li - t[i]) / pi;
 				if (amax < alpha) {
-					alpha = std::max(0.0, amax);
+					alpha = max((double)0.0, amax);
 				}
 			}
 		}
