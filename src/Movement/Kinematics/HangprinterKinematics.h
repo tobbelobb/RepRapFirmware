@@ -72,7 +72,7 @@ private:
 	enum class FlexAlgorithm : uint8_t { None = 0, Qp = 1, Tikhonov = 2 };
 
 	// Basic facts about movement system
-	static constexpr const char*_ecv_array ANCHOR_CHARS = "ABCDIJKLO";
+	static constexpr const char*_ecv_array ANCHOR_CHARS = "ABCDIJLO";
 	static constexpr size_t DefaultNumAnchors = 4;
 
 	// Constructors
