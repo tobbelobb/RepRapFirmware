@@ -1244,8 +1244,8 @@ GCodeResult HangprinterKinematics::ReadODrive3AxisForce(DriverId const driver, c
 	if (motorCurrent.valid)
 	{
 		size_t const boardIndex = driver.boardAddress - 40;
-		if (boardIndex < 0 or boardIndex > 3) {
-			reply.catf("Board address not between 40 and 43: %d", driver.boardAddress);
+		if (boardIndex < 0 or boardIndex > 9) {
+			reply.catf("Board address not between 40 and 49: %d", driver.boardAddress);
 			return GCodeResult::error;
 		}
 		// This force calculation if very rough, assuming perfect data from ODrive,
@@ -1302,9 +1302,9 @@ GCodeResult ComputeODrive3TorqueFromForceInternal(
 	}
 
 	const int boardIndex = (int)driver.boardAddress - 40;
-	if (boardIndex < 0 || boardIndex > 3)
+	if (boardIndex < 0 || boardIndex > 9)
 	{
-		reply.catf("Board address not between 40 and 43: %d", driver.boardAddress);
+		reply.catf("Board address not between 40 and 49: %d", driver.boardAddress);
 		return GCodeResult::error;
 	}
 
