@@ -520,10 +520,6 @@ void HangprinterKinematics::FlexDistances(float const machinePos[3], float const
                                           float flex[HANGPRINTER_MAX_ANCHORS]) const noexcept {
 	float springKs[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	for (size_t i = 0; i < numAnchors; ++i) {
-    // TODO: The spring should get stiffer if we have more lines on the same axis.
-    // We frequently have 2 lines in a prallelogram to stabilize, but that is currently not taken into
-    // account in the springKs.
-    // So 2 lines in 1 direction should be twice as stiff as 1 line.
 		springKs[i] = SpringK(distances[i] * mechanicalAdvantage[i] + guyWireLengths[i]);
 	}
 
