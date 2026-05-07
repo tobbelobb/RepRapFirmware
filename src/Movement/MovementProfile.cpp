@@ -491,9 +491,9 @@ void MovementProfile::CalculateGeneralSCurvePlan(double distance) noexcept
 		double rslt[2];
 		const size_t numSolutions = SolveQuadratic(coeff2, coeff1, coeff0, rslt);
 
-		double t1, t5;
+		double t1 = 0.0, t5 = 0.0;
 		bool foundSolution = false;
-		double bestTime;
+		double bestTime = 0.0;
 		for (size_t i = 0; i < numSolutions; ++i)
 		{
 			const double tempT1 = rslt[i];
@@ -621,9 +621,9 @@ void MovementProfile::CalculateGeneralSCurvePlan(double distance) noexcept
 		}
 
 		// We want a solution in which t0, t2 and t6 are all non-negative. If there is more than one, we want the one with the lowest sum.
-		double t0, t2, t6;
+		double t0 = 0.0, t2 = 0.0, t6 = 0.0;
 		bool foundSolution = false;
-		double bestTime;
+		double bestTime = 0.0;
 		for (size_t i = 0; i < numSolutions; ++i)
 		{
 			const double tempT0 = rslt[i];
