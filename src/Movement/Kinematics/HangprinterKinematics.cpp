@@ -433,7 +433,7 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 				reply.catf(":%.4f", (double)torqueConstants[i]);
 			}
 			const uint32_t flexValue = flexEnabled ? ((flexAlgorithm == FlexAlgorithm::Tikhonov) ? 2u : 1u) : 0u;
-			reply.lcatf("F%u B%u P%u", flexValue, ignoreGravity ? 1u : 0u, ignorePretension ? 1u : 0u);
+			reply.lcatf("F%u B%u P%u", static_cast<unsigned int>(flexValue), ignoreGravity ? 1u : 0u, ignorePretension ? 1u : 0u);
 		}
 		requiresRehome = geometryChanged;
 	}
@@ -940,7 +940,7 @@ bool HangprinterKinematics::WriteCalibrationParameters(FileStore *f) const noexc
 	ok = f->Write(scratchString.c_str());
 	if (!ok) return false;
 
-	scratchString.printf("N%ld", numAnchors);
+	scratchString.printf("N%zu", numAnchors);
 	for (size_t i = 0; i < numAnchors; ++i)
 	{
 		scratchString.catf("%c%.3f:%.3f:%.3f ", ANCHOR_CHARS[i], (double)anchors[i][X_AXIS], (double)anchors[i][Y_AXIS], (double)anchors[i][Z_AXIS]);
@@ -1040,7 +1040,7 @@ bool HangprinterKinematics::WriteCalibrationParameters(FileStore *f) const noexc
 	if (!ok) return false;
 
 	uint32_t flexValue = flexEnabled ? ((flexAlgorithm == FlexAlgorithm::Tikhonov) ? 2u : 1u) : 0u;
-	scratchString.printf(" F%u G%u P%u\n", flexValue, ignoreGravity ? 1u : 0u, ignorePretension ? 1u : 0u);
+	scratchString.printf(" F%u B%u P%u\n", static_cast<unsigned int>(flexValue), ignoreGravity ? 1u : 0u, ignorePretension ? 1u : 0u);
 	ok = f->Write(scratchString.c_str());
 
 	return ok;
@@ -1187,9 +1187,39 @@ HangprinterKinematics::ODriveAnswer HangprinterKinematics::GetODrive3EncoderEsti
 #if DUAL_CAN
 namespace
 {
+static bool GetHardcodedDriverDirectionForwards(DriverId const driver, bool& forwards) noexcept
+{
+	if (!driver.IsRemote())
+	{
+		forwards = true;
+		return true;
+	}
+
+	// Old Hangprinter/ODrive hard-coded direction convention:
+	// boards 40,41 were treated as "forwards";
+	// boards 42,43 were treated as reversed.
+	switch (driver.boardAddress)
+	{
+	case 40:
+	case 41:
+		forwards = true;
+		return true;
+
+	case 42:
+	case 43:
+		forwards = false;
+		return true;
+
+	default:
+		// For newer/extra ODrive board addresses, preserve a harmless default.
+		// Callers still validate boardAddress range separately.
+		forwards = true;
+		return true;
+	}
+}
+
 bool TryGetDriverDirectionForwards(DriverId driver, bool& forwards) noexcept
 {
-#if SUPPORT_CAN_EXPANSION
 	if (driver.IsLocal())
 	{
 		const Move& move = reprap.GetMove();
@@ -1201,17 +1231,14 @@ bool TryGetDriverDirectionForwards(DriverId driver, bool& forwards) noexcept
 		return false;
 	}
 
-#if defined(RRF_HOST_BUILD) && RRF_HOST_BUILD
+#if SUPPORT_CAN_EXPANSION && defined(RRF_HOST_BUILD) && RRF_HOST_BUILD
 	if (driver.IsRemote())
 	{
 		forwards = reprap.GetExpansion().GetDriverDirection(driver);
 		return true;
 	}
 #endif
-#endif
-	(void)driver;
-	(void)forwards;
-	return false;
+	return GetHardcodedDriverDirectionForwards(driver, forwards);
 }
 }
 #endif // DUAL_CAN
@@ -1624,11 +1651,11 @@ static inline void applyA(const float* A, int N, const float* T, float res[3])
 	res[2] = fz;
 }
 
-static inline bool chol_decompose(double *G, int k) {
-	const double eps = 1e-14;
+static inline bool chol_decompose(float *G, int k) {
+	const float eps = 1e-7;
 	for (int i = 0; i < k; ++i) {
 		for (int j = 0; j <= i; ++j) {
-			double s = G[i * k + j];
+			float s = G[i * k + j];
 			for (int p = 0; p < j; ++p) {
 				s -= G[i * k + p] * G[j * k + p];
 			}
@@ -1648,10 +1675,10 @@ static inline bool chol_decompose(double *G, int k) {
 	return true;
 }
 
-static inline void chol_solve(const double *L, int k, const double *b, double *x) {
-	double y[HANGPRINTER_MAX_ANCHORS] = { 0.0 };
+static inline void chol_solve(const float *L, int k, const float *b, float *x) {
+	float y[HANGPRINTER_MAX_ANCHORS] = { 0.0 };
 	for (int i = 0; i < k; ++i) {
-		double s = b[i];
+		float s = b[i];
 		for (int p = 0; p < i; ++p) {
 			s -= L[i * k + p] * y[p];
 		}
@@ -1659,7 +1686,7 @@ static inline void chol_solve(const double *L, int k, const double *b, double *x
 	}
 	std::fill_n(x, k, 0.0);
 	for (int i = k - 1; i >= 0; --i) {
-		double s = y[i];
+		float s = y[i];
 		for (int p = i + 1; p < k; ++p) {
 			s -= L[p * k + i] * x[p];
 		}
@@ -1667,31 +1694,32 @@ static inline void chol_solve(const double *L, int k, const double *b, double *x
 	}
 }
 
-static inline void solve_box_ridge_ls(const float *A, int N, const float F[3], double lambda, const double *L, const double *U, int max_iters, double tol, double *T_out) {
-	double H[HANGPRINTER_MAX_ANCHORS * HANGPRINTER_MAX_ANCHORS] = { 0.0 };
-	double f[HANGPRINTER_MAX_ANCHORS] = { 0.0 };
+static inline void solve_box_ridge_ls(const float *A, int N, const float F[3], float lambda, const float *L, const float *U, int max_iters, float tol, float *T_out) {
+
+	float H[HANGPRINTER_MAX_ANCHORS * HANGPRINTER_MAX_ANCHORS] = { 0.0 };
+	float f[HANGPRINTER_MAX_ANCHORS] = { 0.0 };
 
 	for (int i = 0; i < N; ++i) {
-		const double aix = A[0 * N + i], aiy = A[1 * N + i], aiz = A[2 * N + i];
+		const float aix = A[0 * N + i], aiy = A[1 * N + i], aiz = A[2 * N + i];
 		f[i] = aix * F[0] + aiy * F[1] + aiz * F[2];
 		for (int j = 0; j <= i; ++j) {
-			const double ajx = A[0 * N + j], ajy = A[1 * N + j], ajz = A[2 * N + j];
-			const double dot = aix * ajx + aiy * ajy + aiz * ajz;
-			const double v = dot + (i == j ? lambda : 0.0);
+			const float ajx = A[0 * N + j], ajy = A[1 * N + j], ajz = A[2 * N + j];
+			const float dot = aix * ajx + aiy * ajy + aiz * ajz;
+			const float v = dot + (i == j ? lambda : 0.0);
 			H[i * N + j] = v;
 			H[j * N + i] = v;
 		}
 	}
 
-	double Lfull[HANGPRINTER_MAX_ANCHORS * HANGPRINTER_MAX_ANCHORS];
+	float Lfull[HANGPRINTER_MAX_ANCHORS * HANGPRINTER_MAX_ANCHORS];
 	std::size_t count = static_cast<std::size_t>(N) * N;
 	std::copy_n(H, count, Lfull);
 	chol_decompose(Lfull, N);
-	double t[HANGPRINTER_MAX_ANCHORS] = { 0.0 };
+	float t[HANGPRINTER_MAX_ANCHORS] = { 0.0 };
 	chol_solve(Lfull, N, f, t);
 	for (int i = 0; i < N; ++i) {
-		double li = L ? L[i] : 0.0;
-		double ui = U ? U[i] : std::numeric_limits<double>::infinity();
+		float li = L ? L[i] : 0.0;
+		float ui = U ? U[i] : std::numeric_limits<float>::infinity();
 		if (ui < li) {
 			ui = li;
 		}
@@ -1700,24 +1728,24 @@ static inline void solve_box_ridge_ls(const float *A, int N, const float F[3], d
 
 	int free_idx[HANGPRINTER_MAX_ANCHORS];
 	int free_idx_count = 0;
-	double g[HANGPRINTER_MAX_ANCHORS];
+	float g[HANGPRINTER_MAX_ANCHORS];
 
-	auto projected_grad_norm = [&](const double *x) {
-		double s2 = 0.0;
+	auto projected_grad_norm = [&](const float *x) {
+		float s2 = 0.0;
 		for (int i = 0; i < N; ++i) {
-			double li = L ? L[i] : 0.0;
-			double ui = U ? U[i] : std::numeric_limits<double>::infinity();
+			float li = L ? L[i] : 0.0;
+			float ui = U ? U[i] : std::numeric_limits<float>::infinity();
 			if (ui < li) {
 				ui = li;
 			}
-			double gi = 0.0;
+			float gi = 0.0;
 			for (int j = 0; j < N; ++j) {
 				gi += H[i * N + j] * x[j];
 			}
 			gi -= f[i];
-			const bool atL = (x[i] <= li + 1e-12);
-			const bool atU = (x[i] >= ui - 1e-12);
-			double pgi = gi;
+			const bool atL = (x[i] <= li + 1e-5);
+			const bool atU = (x[i] >= ui - 1e-5);
+			float pgi = gi;
 			if (atL && gi > 0) {
 				pgi = 0.0;
 			}
@@ -1731,7 +1759,7 @@ static inline void solve_box_ridge_ls(const float *A, int N, const float F[3], d
 
 	for (int it = 0; it < max_iters; ++it) {
 		for (int i = 0; i < N; ++i) {
-			double gi = 0.0;
+			float gi = 0.0;
 			for (int j = 0; j < N; ++j) {
 				gi += H[i * N + j] * t[j];
 			}
@@ -1739,13 +1767,13 @@ static inline void solve_box_ridge_ls(const float *A, int N, const float F[3], d
 		}
 		free_idx_count = 0;
 		for (int i = 0; i < N; ++i) {
-			double li = L ? L[i] : 0.0;
-			double ui = U ? U[i] : std::numeric_limits<double>::infinity();
+			float li = L ? L[i] : 0.0;
+			float ui = U ? U[i] : std::numeric_limits<float>::infinity();
 			if (ui < li) {
 				ui = li;
 			}
-			const bool atL = (t[i] <= li + 1e-12);
-			const bool atU = (t[i] >= ui - 1e-12);
+			const bool atL = (t[i] <= li + 1e-5);
+			const bool atU = (t[i] >= ui - 1e-5);
 			const bool violateL = atL && (g[i] < -tol);
 			const bool violateU = atU && (g[i] > tol);
 			if ((!atL && !atU) || violateL || violateU) {
@@ -1757,18 +1785,18 @@ static inline void solve_box_ridge_ls(const float *A, int N, const float F[3], d
 		}
 		if (free_idx_count == 0) {
 			int best = 0;
-			double bestViol = 0.0;
+			float bestViol = 0.0;
 			for (int i = 0; i < N; ++i) {
-				double li = L ? L[i] : 0.0;
-				double ui = U ? U[i] : std::numeric_limits<double>::infinity();
+				float li = L ? L[i] : 0.0;
+				float ui = U ? U[i] : std::numeric_limits<float>::infinity();
 				if (ui < li) {
 					ui = li;
 				}
-				const bool atL = (t[i] <= li + 1e-12);
-				const bool atU = (t[i] >= ui - 1e-12);
-				double viol = 0.0;
+				const bool atL = (t[i] <= li + 1e-5);
+				const bool atU = (t[i] >= ui - 1e-5);
+				float viol = 0.0;
 				if (atL) {
-					viol = max((double)0.0, -g[i]);
+					viol = max((float)0.0, -g[i]);
 				}
 				if (atU) {
 					viol = max(viol, g[i]);
@@ -1781,9 +1809,9 @@ static inline void solve_box_ridge_ls(const float *A, int N, const float F[3], d
 			free_idx[free_idx_count++] = best;
 		}
 		const int k = free_idx_count;
-		double Hff[HANGPRINTER_MAX_ANCHORS * HANGPRINTER_MAX_ANCHORS] = { 0.0 };
-		double gf[HANGPRINTER_MAX_ANCHORS] = { 0.0 };
-		double pf[HANGPRINTER_MAX_ANCHORS] = { 0.0 };
+		float Hff[HANGPRINTER_MAX_ANCHORS * HANGPRINTER_MAX_ANCHORS] = { 0.0 };
+		float gf[HANGPRINTER_MAX_ANCHORS] = { 0.0 };
+		float pf[HANGPRINTER_MAX_ANCHORS] = { 0.0 };
 
 		for (int p = 0; p < k; ++p) {
 			const int ip = free_idx[p];
@@ -1798,27 +1826,27 @@ static inline void solve_box_ridge_ls(const float *A, int N, const float F[3], d
 			gf[i] = -gf[i];
 		}
 		chol_solve(Hff, k, gf, pf);
-		double alpha = 1.0;
+		float alpha = 1.0;
 		for (int idx = 0; idx < k; ++idx) {
 			const int i = free_idx[idx];
-			const double pi = pf[idx];
-			if (std::abs(pi) < 1e-16) {
+			const float pi = pf[idx];
+			if (std::abs(pi) < 1e-8) {
 				continue;
 			}
-			double li = L ? L[i] : 0.0;
-			double ui = U ? U[i] : std::numeric_limits<double>::infinity();
+			float li = L ? L[i] : 0.0;
+			float ui = U ? U[i] : std::numeric_limits<float>::infinity();
 			if (ui < li) {
 				ui = li;
 			}
 			if (pi > 0.0) {
-				const double amax = (ui - t[i]) / pi;
+				const float amax = (ui - t[i]) / pi;
 				if (amax < alpha) {
-					alpha = max((double)0.0, amax);
+					alpha = max((float)0.0, amax);
 				}
 			} else {
-				const double amax = (li - t[i]) / pi;
+				const float amax = (li - t[i]) / pi;
 				if (amax < alpha) {
-					alpha = max((double)0.0, amax);
+					alpha = max((float)0.0, amax);
 				}
 			}
 		}
@@ -1827,8 +1855,8 @@ static inline void solve_box_ridge_ls(const float *A, int N, const float F[3], d
 			t[i] += alpha * pf[idx];
 		}
 		for (int i = 0; i < N; ++i) {
-			double li = L ? L[i] : 0.0;
-			double ui = U ? U[i] : std::numeric_limits<double>::infinity();
+			float li = L ? L[i] : 0.0;
+			float ui = U ? U[i] : std::numeric_limits<float>::infinity();
 			if (ui < li) {
 				ui = li;
 			}
@@ -1932,13 +1960,13 @@ void HangprinterKinematics::StaticForcesQp(
 		out.requestedForce[2] = cfg.massKg * cfg.g;
 	}
 
-	double L[HANGPRINTER_MAX_ANCHORS];
-	double U[HANGPRINTER_MAX_ANCHORS];
+	float L[HANGPRINTER_MAX_ANCHORS];
+	float U[HANGPRINTER_MAX_ANCHORS];
 	std::fill_n(L, numAnchors, 0.0);
-	std::fill_n(U, numAnchors, std::numeric_limits<double>::infinity());
+	std::fill_n(U, numAnchors, std::numeric_limits<float>::infinity());
 	for (size_t i = 0; i < numAnchors; ++i) {
-		const double li = cfg.ignorePretension ? 0.0 : (cfg.Tmin ? cfg.Tmin[i] : 0.0);
-		double ui = (cfg.Tmax ? cfg.Tmax[i] : std::numeric_limits<double>::infinity());
+		const float li = cfg.ignorePretension ? 0.0 : (cfg.Tmin ? cfg.Tmin[i] : 0.0);
+		float ui = (cfg.Tmax ? cfg.Tmax[i] : std::numeric_limits<float>::infinity());
 		if (ui < li) {
 			ui = li;
 		}
@@ -1946,12 +1974,7 @@ void HangprinterKinematics::StaticForcesQp(
 		U[i] = ui;
 	}
 
-	double Td[HANGPRINTER_MAX_ANCHORS] = { 0.0 };
-	solve_box_ridge_ls(A, numAnchors, out.requestedForce, cfg.lambda, L, U, cfg.maxItersTarget, cfg.tol, Td);
-
-	for (size_t i = 0; i < numAnchors; ++i) {
-		T[i] = (float)Td[i];
-	}
+	solve_box_ridge_ls(A, numAnchors, out.requestedForce, cfg.lambda, L, U, cfg.maxItersTarget, cfg.tol, T);
 
 	applyA(A, numAnchors, T, out.achievedForce);
 	out.residual[0] = out.requestedForce[0] - out.achievedForce[0];
