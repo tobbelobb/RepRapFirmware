@@ -194,10 +194,9 @@ void HangprinterKinematics::Recalc() noexcept
 #endif
 }
 
-// Return the name of the current kinematics
-const char *HangprinterKinematics::GetName(bool forStatusReport) const noexcept
+const char *_ecv_array HangprinterKinematics::GetName(bool forStatusReport) const noexcept
 {
-	return "Hangprinter";
+    return "Hangprinter";
 }
 
 // Set the parameters from a M665, M666 or M669 command
