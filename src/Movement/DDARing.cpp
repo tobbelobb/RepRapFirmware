@@ -336,7 +336,7 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 				debugPrintf("Queue drained - starting first move after empty period.\n");
 			}
 		}
-		const uint32_t ret = PrepareMoves(cdda, prepareAdvanceTime, 0, 0, simulationMode);
+		const uint32_t ret = PrepareMoves(cdda, prepareAdvanceTime, 0, simulationMode);
 		if (cdda->IsCommitted())
 		{
 			if (simulationMode != SimulationMode::off)
