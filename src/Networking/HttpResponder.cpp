@@ -15,6 +15,7 @@
 #include "GCodes/GCodes.h"
 #include "General/IP4String.h"
 #include <cstring>
+#include <inttypes.h>
 #if RRF_HOST_BUILD
 # include <HostIdle.h>
 # include <string>
@@ -1129,7 +1130,7 @@ void HttpResponder::SendFile(const char *_ecv_array nameOfFileToSend, bool isWeb
 		outBuf->cat("Content-Encoding: gzip\r\n");
 	}
 
-	outBuf->catf("Content-Length: %lu\r\n", fileToSend->Length());
+	outBuf->catf("Content-Length: %" PRIu32 "\r\n", fileToSend->Length());
 	const bool keepAlive = skt->UsingTls();
 	outBuf->catf("Connection: %s\r\n\r\n", keepAlive ? "keep-alive" : "close");
 	if (keepAlive)

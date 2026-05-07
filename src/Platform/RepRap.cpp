@@ -1360,7 +1360,7 @@ bool RepRap::SpinTimeoutImminent() const noexcept
 	outbuf->copy('{');
 	if (gb != nullptr && gb->HadExplicitLineNumber())
 	{
-		outbuf->catf("\"line\":%ld,", gb->GetExplicitLineNumber());
+		outbuf->catf("\"line\":%" PRIu32 ",", gb->GetExplicitLineNumber());
 	}
 }
 
@@ -2084,7 +2084,7 @@ bool RepRap::CheckFirmwareUpdatePrerequisites(const StringRef& reply, const Stri
 	return true;
 }
 
-#if HAS_MASS_STORAGE
+#if HAS_MASS_STORAGE && !RRF_HOST_BUILD
 
 // Update the firmware. Prerequisites should be checked before calling this.
 void RepRap::UpdateFirmware(c_string iapFilename, c_string iapParam) noexcept
@@ -2110,6 +2110,8 @@ void RepRap::UpdateFirmware(c_string iapFilename, c_string iapParam) noexcept
 }
 
 #endif
+
+#if !RRF_HOST_BUILD
 
 void RepRap::PrepareToLoadIap() noexcept
 {
@@ -2193,6 +2195,8 @@ void RepRap::PrepareToLoadIap() noexcept
 	delay(1000);							// give it time to send the message
 #endif
 }
+
+#endif
 
 #if RRF_HOST_BUILD
 

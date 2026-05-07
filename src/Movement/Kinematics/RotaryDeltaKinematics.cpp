@@ -292,7 +292,7 @@ bool RotaryDeltaKinematics::DoAutoCalibration(MovementState& ms, size_t numFacto
 
 	if (numFactors < 3 || numFactors > NumDeltaFactors || numFactors == 6)
 	{
-		reply.printf("Rotary delta calibration with %d factors requested but only 3, 4, 5 and 7 supported", numFactors);
+		reply.printf("Rotary delta calibration with %zu factors requested but only 3, 4, 5 and 7 supported", numFactors);
 		return true;
 	}
 
@@ -344,7 +344,7 @@ bool RotaryDeltaKinematics::DoAutoCalibration(MovementState& ms, size_t numFacto
 					ComputeDerivative(adjustedJ, (float)probeMotorPositions(i, DELTA_A_AXIS), (float)probeMotorPositions(i, DELTA_B_AXIS), (float)probeMotorPositions(i, DELTA_C_AXIS));
 				if (std::isnan(d))			// a couple of users have reported getting Nans in the derivative, probably due to points being unreachable
 				{
-					reply.printf("Auto calibration failed because probe point P%u was unreachable using the current delta parameters. Try a smaller probing radius.", i);
+					reply.printf("Auto calibration failed because probe point P%zu was unreachable using the current delta parameters. Try a smaller probing radius.", i);
 					return true;
 				}
 				derivativeMatrix(i, j) = d;
@@ -474,7 +474,7 @@ bool RotaryDeltaKinematics::DoAutoCalibration(MovementState& ms, size_t numFacto
 	reprap.GetMove().SetInitialCalibrationDeviation(initialDeviation);
 	reprap.GetMove().SetLatestCalibrationDeviation(finalDeviation, numFactors);
 
-	reply.printf("Calibrated %d factors using %d points, (mean, deviation) before (%.3f, %.3f) after (%.3f, %.3f)",
+	reply.printf("Calibrated %zu factors using %zu points, (mean, deviation) before (%.3f, %.3f) after (%.3f, %.3f)",
 			numFactors, numPoints,
 			(double)initialDeviation.GetMean(), (double)initialDeviation.GetDeviationFromMean(),
 			(double)finalDeviation.GetMean(), (double)finalDeviation.GetDeviationFromMean());

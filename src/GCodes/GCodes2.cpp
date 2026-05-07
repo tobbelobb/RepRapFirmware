@@ -1522,7 +1522,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 						reply.copy("{");
 						if (gb.HadExplicitLineNumber())
 						{
-							reply.catf("\"line\":%ld,", gb.GetExplicitLineNumber());
+							reply.catf("\"line\":%" PRIu32 ",", gb.GetExplicitLineNumber());
 						}
 						reply.catf("\"SDinfo\":{\"slot\":%" PRIu32 ",\"present\":", slot);
 						if (res == MassStorage::InfoResult::ok)

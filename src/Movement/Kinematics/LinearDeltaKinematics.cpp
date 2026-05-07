@@ -358,7 +358,7 @@ LimitPositionResult LinearDeltaKinematics::LimitPosition(float finalCoords[], co
 											tdmSquared = P2 + fsquare(dz);
 											if (reprap.Debug(Module::Kinematics))
 											{
-												debugPrintf("Limit tower %u, t=%.2f\n", tower, (double)t);
+												debugPrintf("Limit tower %zu, t=%.2f\n", tower, (double)t);
 											}
 										}
 										else
@@ -383,7 +383,7 @@ LimitPositionResult LinearDeltaKinematics::LimitPosition(float finalCoords[], co
 								limited = true;
 								if (reprap.Debug(Module::Kinematics))
 								{
-									debugPrintf("Limit tower %u\n", tower);
+									debugPrintf("Limit tower %zu\n", tower);
 								}
 								if (tower + 1 < numTowers)
 								{
@@ -434,7 +434,7 @@ bool LinearDeltaKinematics::DoAutoCalibration(MovementState& ms, size_t numFacto
 
 	if (numFactors < 3 || numFactors > NumDeltaFactors || numFactors == 5)
 	{
-		reply.printf("Delta calibration with %d factors requested but only 3, 4, 6, 7, 8 and 9 supported", numFactors);
+		reply.printf("Delta calibration with %zu factors requested but only 3, 4, 6, 7, 8 and 9 supported", numFactors);
 		return true;
 	}
 
@@ -486,7 +486,7 @@ bool LinearDeltaKinematics::DoAutoCalibration(MovementState& ms, size_t numFacto
 					ComputeDerivative(adjustedJ, (float)probeMotorPositions(i, DELTA_A_AXIS), (float)probeMotorPositions(i, DELTA_B_AXIS), (float)probeMotorPositions(i, DELTA_C_AXIS));
 				if (std::isnan(d))			// a couple of users have reported getting Nans in the derivative, probably due to points being unreachable
 				{
-					reply.printf("Auto calibration failed because probe point P%u was unreachable using the current delta parameters. Try a smaller probing radius.", i);
+					reply.printf("Auto calibration failed because probe point P%zu was unreachable using the current delta parameters. Try a smaller probing radius.", i);
 					return true;
 				}
 				derivativeMatrix(i, j) = d;
@@ -623,7 +623,7 @@ bool LinearDeltaKinematics::DoAutoCalibration(MovementState& ms, size_t numFacto
 	reprap.GetMove().SetInitialCalibrationDeviation(initialDeviation);
 	reprap.GetMove().SetLatestCalibrationDeviation(finalDeviation, numFactors);
 
-	reply.printf("Calibrated %d factors using %d points, (mean, deviation) before (%.3f, %.3f) after (%.3f, %.3f)",
+	reply.printf("Calibrated %zu factors using %zu points, (mean, deviation) before (%.3f, %.3f) after (%.3f, %.3f)",
 			numFactors, numPoints,
 			(double)initialDeviation.GetMean(), (double)initialDeviation.GetDeviationFromMean(),
 			(double)finalDeviation.GetMean(), (double)finalDeviation.GetDeviationFromMean());
