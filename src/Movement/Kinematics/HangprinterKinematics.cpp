@@ -69,17 +69,6 @@ DEFINE_GET_OBJECT_MODEL_TABLE_WITH_PARENT(HangprinterKinematics, RoundBedKinemat
 
 #endif
 
-Kinematics::KinematicsTypeDescriptor HangprinterKinematics::hangprinterKinematicsDescriptor(HangprinterKinematics::Create);
-
-/*static*/ Kinematics *_ecv_from _ecv_null HangprinterKinematics::Create(const char *_ecv_array _ecv_null name, int legacyNumber) noexcept
-{
-	if (MatchesLegacyType(name, legacyNumber, KinematicsType::hangprinter))
-	{
-		return new HangprinterKinematics();
-	}
-	return nullptr;
-}
-
 // Constructor
 HangprinterKinematics::HangprinterKinematics() noexcept
 	: RoundBedKinematics(KinematicsType::hangprinter, SegmentationType(true, true, true))
@@ -209,10 +198,9 @@ void HangprinterKinematics::Recalc() noexcept
 #endif
 }
 
-// Return the name of the current kinematics
-const char *HangprinterKinematics::GetName(bool forStatusReport) const noexcept
+const char *_ecv_array HangprinterKinematics::GetName(bool forStatusReport) const noexcept
 {
-	return "Hangprinter";
+    return "Hangprinter";
 }
 
 // Set the parameters from a M665, M666 or M669 command

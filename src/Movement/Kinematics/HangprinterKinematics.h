@@ -70,7 +70,6 @@ protected:
 	bool IsInsidePrismSides(float const coords[3], unsigned const discount_last) const noexcept;
 
 private:
-	static KinematicsTypeDescriptor hangprinterKinematicsDescriptor;
 	enum class FlexAlgorithm : uint8_t { None = 0, Qp = 1, Tikhonov = 2 };
 
 	// Basic facts about movement system
