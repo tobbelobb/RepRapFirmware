@@ -103,6 +103,7 @@ private:
 	// Flex compensation configurables
 	float moverWeight_kg = 0.0F;
 	float springKPerUnitLength = 0.0F;
+	uint32_t linesPerAxis[HANGPRINTER_MAX_ANCHORS] = { 0 };
 	float minForce_Newton[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	float maxForce_Newton[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	float guyWireLengths[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
