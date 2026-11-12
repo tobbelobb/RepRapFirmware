@@ -468,7 +468,8 @@ void HangprinterKinematics::FlexDistances(float const machinePos[3], float const
 	StaticForces(machinePos, F);
 
 	for (size_t i = 0; i < numAnchors; ++i) {
-		flex[i] = -F[i] / (springKs[i] * mechanicalAdvantage[i] * linesPerAxis[i]);
+		// Convert per-line stretch to effector distance; steps/mm already includes MA.
+		flex[i] = -F[i] / (springKs[i] * mechanicalAdvantage[i] * mechanicalAdvantage[i] * linesPerAxis[i]);
 	}
 }
 
