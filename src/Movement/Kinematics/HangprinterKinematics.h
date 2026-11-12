@@ -111,6 +111,12 @@ private:
 
 	FlexAlgorithm flexAlgorithm = FlexAlgorithm::Qp;
 	bool flexEnabled = false;
+	// A mode change does not physically tension the lines. Keep the old pose
+	// for these endpoints until a move applies the new compensation.
+	mutable bool flexChangePending = false;
+	int32_t motorPosBeforeFlexChange[HANGPRINTER_MAX_ANCHORS] = { 0 };
+	float posBeforeFlexChange[3] = { 0.0F };
+
 	bool ignoreGravity = false;
 	bool ignorePretension = false;
 

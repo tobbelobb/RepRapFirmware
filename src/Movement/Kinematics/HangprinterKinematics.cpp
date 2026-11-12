@@ -74,6 +74,7 @@ HangprinterKinematics::HangprinterKinematics() noexcept
 
 void HangprinterKinematics::Init() noexcept
 {
+	flexChangePending = false;
 	/* Naive buildup factor calculation (assumes cylindrical, straight line)
 	 * line diameter: 0.5 mm
 	 * spool height: 8.0 mm
@@ -228,6 +229,7 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 
 		if (seen)
 		{
+			flexChangePending = false;
 			Recalc();
 			requiresRehome = true;
 		}
@@ -244,6 +246,14 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 	}
 	else if (mCode == 666)
 	{
+		const bool oldFlexEnabled = flexEnabled;
+		const FlexAlgorithm oldFlexAlgorithm = flexAlgorithm;
+		float oldPosition[MaxAxes] = { 0.0F };
+		if (gb.Seen('F'))
+		{
+			// M666 has already locked movement and reached standstill using the old model.
+			reprap.GetMove().GetCurrentMachinePosition(oldPosition, gb.GetActiveQueueNumber());
+		}
 		bool geometryParamSeen = false;
 		bool seenFlexParam = false;
 		// 0=None, 1=last-top, 2=all-top, 3-half-top, etc
@@ -382,6 +392,16 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 			reply.lcatf("F%u B%u P%u", static_cast<unsigned int>(flexValue), ignoreGravity ? 1u : 0u, ignorePretension ? 1u : 0u);
 		}
 		requiresRehome = geometryParamSeen;
+		if (geometryParamSeen)
+		{
+			flexChangePending = false;
+		}
+		else if (seenFlexParam && (oldFlexEnabled != flexEnabled || oldFlexAlgorithm != flexAlgorithm))
+		{
+			memcpyf(posBeforeFlexChange, oldPosition, 3);
+			memcpyi32(motorPosBeforeFlexChange, MovementState::GetLastKnownEndpoints(), numAnchors);
+			flexChangePending = true;
+		}
 	}
 	else
 	{
@@ -690,6 +710,21 @@ HangprinterKinematics::SolverResult HangprinterKinematics::SolveHybrid(
 // Convert motor coordinates to machine coordinates.
 void HangprinterKinematics::MotorStepsToCartesian(const int32_t motorPos[], const float stepsPerMm[], size_t numVisibleAxes, size_t numTotalAxes, float machinePos[]) const noexcept
 {
+	if (flexChangePending)
+	{
+		bool unchanged = true;
+		for (size_t i = 0; i < numAnchors; ++i)
+		{
+			unchanged = unchanged && motorPos[i] == motorPosBeforeFlexChange[i];
+		}
+		if (unchanged)
+		{
+			memcpyf(machinePos, posBeforeFlexChange, 3);
+			return;
+		}
+		flexChangePending = false;
+	}
+
 	// Define the line positions the solver should try to find
 	float linePositions[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	for (size_t i = 0; i < numAnchors; ++i) {
