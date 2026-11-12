@@ -715,6 +715,11 @@ void Move::Exit() noexcept
 			else
 			{
 				// If there's a G Code move available, add it to the DDA ring for processing.
+#if RRF_HOST_BUILD
+				// Reading the move clears segmentsLeft before the ring holds it. On hardware the Main task
+				// cannot run in between; here it is another thread, so lock out its standstill check.
+				TaskCriticalSectionLocker lock;
+#endif
 				RawMove nextMove;
 				GCodes& gcodes = reprap.GetGCodes();
 				if (gcodes.ReadMove(0, nextMove))							// if we have a new move
@@ -785,6 +790,11 @@ void Move::Exit() noexcept
 			else
 			{
 				// If there's a G Code move available, add it to the DDA ring for processing.
+#if RRF_HOST_BUILD
+				// Reading the move clears segmentsLeft before the ring holds it. On hardware the Main task
+				// cannot run in between; here it is another thread, so lock out its standstill check.
+				TaskCriticalSectionLocker lock;
+#endif
 				RawMove nextMove;
 				GCodes& gcodes = reprap.GetGCodes();
 				if (gcodes.ReadMove(1, nextMove))							// if we have a new move
@@ -885,6 +895,9 @@ bool Move::WaitingForAllMovesFinished(MovementSystemNumber msNumber
 #endif
 									 ) noexcept
 {
+#if RRF_HOST_BUILD
+	TaskCriticalSectionLocker lock;		// see Move::MoveLoop: the ring must not look idle while a read move is being added
+#endif
 	if (!rings[msNumber].SetWaitingToEmpty())
 	{
 		return false;
@@ -2290,6 +2303,23 @@ void Move::FreeOldSegments(const uint32_t beforeTime) noexcept
 				{
 					prev->SetNext(seg);
 				}
+
+				// Advance the motor position as the step ISR does at the end of a segment. Otherwise the live
+				// motor positions of drives without local steps stay at zero, and every wait for standstill
+				// (G4, M400, end of job) resets the endpoints to them, sending the next move back to zero.
+				const motioncalc_t length = toFree->GetLength();
+				if (toFree->GetFlags().executing)
+				{
+					dm.currentMotorPosition = dm.positionAtSegmentStart + dm.netStepsThisSegment;
+					dm.distanceCarriedForwards += length - (motioncalc_t)dm.netStepsThisSegment;
+				}
+				else
+				{
+					const int32_t netSteps = (int32_t)(length + dm.distanceCarriedForwards);
+					dm.currentMotorPosition += netSteps;
+					dm.distanceCarriedForwards += length - (motioncalc_t)netSteps;
+				}
+				dm.positionAtSegmentStart = dm.currentMotorPosition;
 
 				// Free the segment
 				MoveSegment::Release(toFree);

@@ -244,6 +244,11 @@ uint32_t DDARing::Spin(uint32_t prepareAdvanceTime, SimulationMode simulationMod
 	}
 	else
 	{
+#if RRF_HOST_BUILD
+		// Free() makes a DDA empty before getPointer moves past it. On hardware the Main task cannot run in
+		// between; here it is another thread, which would take the ring for idle while moves remain.
+		TaskCriticalSectionLocker lock;
+#endif
 		// See if we can retire any completed moves
 		while (cdda->IsCommitted() && cdda->HasExpired())
 		{
