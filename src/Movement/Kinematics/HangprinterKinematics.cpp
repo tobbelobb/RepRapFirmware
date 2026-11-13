@@ -127,6 +127,10 @@ void HangprinterKinematics::Init() noexcept
 	ARRAY_INIT(minForce_Newton, DefaultMinForce_Newton);
 	ARRAY_INIT(maxForce_Newton, DefaultMaxForce_Newton);
 	ARRAY_INIT(guyWireLengths, DefaultGuyWireLengths);
+	for (size_t i = 0; i < HANGPRINTER_MAX_ANCHORS; ++i)
+	{
+		attachments[i][X_AXIS] = attachments[i][Y_AXIS] = attachments[i][Z_AXIS] = 0.0F;
+	}
 	ARRAY_INIT(torqueConstants, DefaultTorqueConstants);
 
 	Recalc();
@@ -147,10 +151,13 @@ void HangprinterKinematics::Recalc() noexcept
 
 	// This is the difference between a "line length" and a "line position"
 	// "line length" == ("line position" + "line length in origin")
+	float attachmentRadiusSq = 0.0F;
 	for (size_t i = 0; i < numAnchors; ++i)
 	{
 		distancesOrigin[i] = norm(anchors[i]);
+		attachmentRadiusSq += fsquare(norm(attachments[i]));
 	}
+	invAttachmentRadius = (attachmentRadiusSq > 1.0e-9F) ? fastSqrtf((float)numAnchors / attachmentRadiusSq) : 0.0F;
 
 	//// Line buildup compensation
 	float stepsPerUnitTimesRTmp[HANGPRINTER_MAX_ANCHORS] = { 0.0 };
@@ -277,6 +284,7 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 		gb.TryGetFloatArray('I', numAnchors, minForce_Newton, geometryParamSeen);
 		gb.TryGetFloatArray('X', numAnchors, maxForce_Newton, geometryParamSeen);
 		gb.TryGetFloatArray('Y', numAnchors, guyWireLengths, geometryParamSeen);
+		gb.TryGetFloatArray('E', 3 * numAnchors, attachments[0], geometryParamSeen);
 		gb.TryGetFloatArray('C', numAnchors, torqueConstants, geometryParamSeen);
 		int32_t flexCommand = 0;
 		if (gb.TryGetIValue('F', flexCommand, seenFlexParam))
@@ -387,6 +395,12 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 			for (size_t i = 1; i < numAnchors; ++i)
 			{
 				reply.catf(":%.4f", (double)torqueConstants[i]);
+			}
+
+			reply.lcatf("E%.3f:%.3f:%.3f", (double)attachments[0][X_AXIS], (double)attachments[0][Y_AXIS], (double)attachments[0][Z_AXIS]);
+			for (size_t i = 1; i < numAnchors; ++i)
+			{
+				reply.catf(":%.3f:%.3f:%.3f", (double)attachments[i][X_AXIS], (double)attachments[i][Y_AXIS], (double)attachments[i][Z_AXIS]);
 			}
 			const uint32_t flexValue = flexEnabled ? ((flexAlgorithm == FlexAlgorithm::Tikhonov) ? 2u : 1u) : 0u;
 			reply.lcatf("F%u B%u P%u", static_cast<unsigned int>(flexValue), ignoreGravity ? 1u : 0u, ignorePretension ? 1u : 0u);
@@ -1029,6 +1043,14 @@ bool HangprinterKinematics::WriteCalibrationParameters(FileStore *f) const noexc
 	ok = f->Write(scratchString.c_str());
 	if (!ok) return false;
 
+	scratchString.printf(" E%.3f:%.3f:%.3f", (double)attachments[0][X_AXIS], (double)attachments[0][Y_AXIS], (double)attachments[0][Z_AXIS]);
+	for (size_t i = 1; i < numAnchors; ++i)
+	{
+		scratchString.catf(":%.3f:%.3f:%.3f", (double)attachments[i][X_AXIS], (double)attachments[i][Y_AXIS], (double)attachments[i][Z_AXIS]);
+	}
+	ok = f->Write(scratchString.c_str());
+	if (!ok) return false;
+
 	uint32_t flexValue = flexEnabled ? ((flexAlgorithm == FlexAlgorithm::Tikhonov) ? 2u : 1u) : 0u;
 	scratchString.printf(" F%u B%u P%u\n", static_cast<unsigned int>(flexValue), ignoreGravity ? 1u : 0u, ignorePretension ? 1u : 0u);
 	ok = f->Write(scratchString.c_str());
@@ -1472,102 +1494,78 @@ static inline void build_direction_matrix(const float mover[3], const float anch
 	}
 }
 
-static inline bool invert3x3(const float M[3][3], float Minv[3][3], float eps = 1e-9f) {
-	const float a = M[0][0], b = M[0][1], c = M[0][2];
-	const float d = M[1][0], e = M[1][1], f = M[1][2];
-	const float g = M[2][0], h = M[2][1], i = M[2][2];
-
-	const float A = (e * i - f * h);
-	const float B = -(d * i - f * g);
-	const float C = (d * h - e * g);
-	const float D = -(b * i - c * h);
-	const float E = (a * i - c * g);
-	const float F = -(a * h - b * g);
-	const float G = (b * f - c * e);
-	const float H = -(a * f - c * d);
-	const float I = (a * e - b * d);
-
-	const float det = a * A + b * B + c * C;
-	if (std::fabs(det) < eps) {
-		return false;
-	}
-	const float invdet = 1.0f / det;
-
-	Minv[0][0] = A * invdet;
-	Minv[0][1] = D * invdet;
-	Minv[0][2] = G * invdet;
-	Minv[1][0] = B * invdet;
-	Minv[1][1] = E * invdet;
-	Minv[1][2] = H * invdet;
-	Minv[2][0] = C * invdet;
-	Minv[2][1] = F * invdet;
-	Minv[2][2] = I * invdet;
-	return true;
-}
-
-static inline void solve_min_norm_T(const float *A, int N, const float Fext[3], float lambda, float *T) {
-	float S[3][3] = {{lambda, 0.0f, 0.0f}, {0.0f, lambda, 0.0f}, {0.0f, 0.0f, lambda}};
+// Columns hold the force and the moment about the centre of mass that a unit
+// tension applies to the mover. Moments are divided by the RMS attachment
+// distance so that all six rows are forces of comparable size.
+static inline void build_wrench_matrix(const float mover[3], const float anchors[HANGPRINTER_MAX_ANCHORS][3],
+                                       const float attachments[HANGPRINTER_MAX_ANCHORS][3], float invAttachmentRadius, int N, float *A) {
+	build_direction_matrix(mover, anchors, N, A);
 	for (int j = 0; j < N; ++j) {
-		const float ax = A[0 * N + j], ay = A[1 * N + j], az = A[2 * N + j];
-		S[0][0] += ax * ax;
-		S[0][1] += ax * ay;
-		S[0][2] += ax * az;
-		S[1][0] += ay * ax;
-		S[1][1] += ay * ay;
-		S[1][2] += ay * az;
-		S[2][0] += az * ax;
-		S[2][1] += az * ay;
-		S[2][2] += az * az;
-	}
-
-	float Sinv[3][3] = { 0.0f };
-	if (!invert3x3(S, Sinv)) {
-		S[0][0] += 1e-6f;
-		S[1][1] += 1e-6f;
-		S[2][2] += 1e-6f;
-		invert3x3(S, Sinv);
-	}
-	const float y0 = Sinv[0][0] * Fext[0] + Sinv[0][1] * Fext[1] + Sinv[0][2] * Fext[2];
-	const float y1 = Sinv[1][0] * Fext[0] + Sinv[1][1] * Fext[1] + Sinv[1][2] * Fext[2];
-	const float y2 = Sinv[2][0] * Fext[0] + Sinv[2][1] * Fext[1] + Sinv[2][2] * Fext[2];
-
-	for (int j = 0; j < N; ++j) {
-		const float ax = A[0 * N + j], ay = A[1 * N + j], az = A[2 * N + j];
-		T[j] = ax * y0 + ay * y1 + az * y2;
+		const float ux = A[0 * N + j], uy = A[1 * N + j], uz = A[2 * N + j];
+		const float rx = attachments[j][0] * invAttachmentRadius;
+		const float ry = attachments[j][1] * invAttachmentRadius;
+		const float rz = attachments[j][2] * invAttachmentRadius;
+		A[3 * N + j] = ry * uz - rz * uy;
+		A[4 * N + j] = rz * ux - rx * uz;
+		A[5 * N + j] = rx * uy - ry * ux;
 	}
 }
 
-static inline void build_null_projector(const float *A, int N, float lambda, float *P) {
-	float S[3][3] = {{lambda, 0.0f, 0.0f}, {0.0f, lambda, 0.0f}, {0.0f, 0.0f, lambda}};
+static inline bool chol_decompose(float *G, int k);
+static inline void chol_solve(const float *L, int k, const float *b, float *x);
+
+// Cholesky factor of A_f A_f^T + lambda I (M x M), where A_f holds the
+// columns of A listed in cols
+static inline void factor_gram(const float *A, int M, int N, const int *cols, int k, float lambda, float *S) {
+	for (int r = 0; r < M; ++r) {
+		for (int c = 0; c <= r; ++c) {
+			float acc = r == c ? lambda : 0.0f;
+			for (int p = 0; p < k; ++p) {
+				acc += A[r * N + cols[p]] * A[c * N + cols[p]];
+			}
+			S[r * M + c] = acc;
+			S[c * M + r] = acc;
+		}
+	}
+	chol_decompose(S, M);
+}
+
+static inline void solve_min_norm_T(const float *A, int M, int N, const float *Fext, float lambda, float *T) {
+	int cols[HANGPRINTER_MAX_ANCHORS] = { 0 };
 	for (int j = 0; j < N; ++j) {
-		const float ax = A[0 * N + j], ay = A[1 * N + j], az = A[2 * N + j];
-		S[0][0] += ax * ax;
-		S[0][1] += ax * ay;
-		S[0][2] += ax * az;
-		S[1][0] += ay * ax;
-		S[1][1] += ay * ay;
-		S[1][2] += ay * az;
-		S[2][0] += az * ax;
-		S[2][1] += az * ay;
-		S[2][2] += az * az;
+		cols[j] = j;
 	}
-
-	float Sinv[3][3] = { 0.0f };
-	if (!invert3x3(S, Sinv)) {
-		S[0][0] += 1e-6f;
-		S[1][1] += 1e-6f;
-		S[2][2] += 1e-6f;
-		invert3x3(S, Sinv);
+	float S[HANGPRINTER_MAX_ROWS * HANGPRINTER_MAX_ROWS];
+	factor_gram(A, M, N, cols, N, lambda, S);
+	float y[HANGPRINTER_MAX_ROWS];
+	chol_solve(S, M, Fext, y);
+	for (int j = 0; j < N; ++j) {
+		float acc = 0.0f;
+		for (int r = 0; r < M; ++r) {
+			acc += A[r * N + j] * y[r];
+		}
+		T[j] = acc;
 	}
+}
 
-	for (int r = 0; r < N; ++r) {
-		for (int c = 0; c < N; ++c) {
-			const float ax = A[0 * N + c], ay = A[1 * N + c], az = A[2 * N + c];
-			const float B0 = Sinv[0][0] * ax + Sinv[0][1] * ay + Sinv[0][2] * az;
-			const float B1 = Sinv[1][0] * ax + Sinv[1][1] * ay + Sinv[1][2] * az;
-			const float B2 = Sinv[2][0] * ax + Sinv[2][1] * ay + Sinv[2][2] * az;
-			const float arx = A[0 * N + r], ary = A[1 * N + r], arz = A[2 * N + r];
-			const float Mrc = arx * B0 + ary * B1 + arz * B2;
+static inline void build_null_projector(const float *A, int M, int N, float lambda, float *P) {
+	int cols[HANGPRINTER_MAX_ANCHORS] = { 0 };
+	for (int j = 0; j < N; ++j) {
+		cols[j] = j;
+	}
+	float S[HANGPRINTER_MAX_ROWS * HANGPRINTER_MAX_ROWS];
+	factor_gram(A, M, N, cols, N, lambda, S);
+	for (int c = 0; c < N; ++c) {
+		float col[HANGPRINTER_MAX_ROWS], B[HANGPRINTER_MAX_ROWS];
+		for (int r = 0; r < M; ++r) {
+			col[r] = A[r * N + c];
+		}
+		chol_solve(S, M, col, B);
+		for (int r = 0; r < N; ++r) {
+			float Mrc = 0.0f;
+			for (int k = 0; k < M; ++k) {
+				Mrc += A[k * N + r] * B[k];
+			}
 			P[r * N + c] = (r == c ? 1.0f : 0.0f) - Mrc;
 		}
 	}
@@ -1821,30 +1819,149 @@ static inline void solve_box_ridge_ls(const float *A, int N, const float F[3], f
 	}
 }
 
+// Smallest tensions within [L, U] that balance the six force and moment
+// equations A T = F. Minimizes |A T - F|^2 + lambda |T|^2 for a small lambda
+// with an active-set method. Every solve is of the M x M system
+// A_f A_f^T + lambda I over the free tensions, which stays well conditioned
+// however small lambda is, and the bound multipliers T_i - a_i^T y are in
+// Newton, so tol is too.
+static inline void solve_box_min_norm(const float *A, int M, int N, const float *Fext, float lambda, const float *L, const float *U, int max_iters, float tol, float *t) {
+	bool isFree[HANGPRINTER_MAX_ANCHORS];
+	int cols[HANGPRINTER_MAX_ANCHORS] = { 0 };
+	float S[HANGPRINTER_MAX_ROWS * HANGPRINTER_MAX_ROWS];
+	float r[HANGPRINTER_MAX_ROWS], y[HANGPRINTER_MAX_ROWS];
+
+	// Start from the unbounded solution, clamped into the bounds
+	for (int i = 0; i < N; ++i) {
+		cols[i] = i;
+	}
+	factor_gram(A, M, N, cols, N, lambda, S);
+	chol_solve(S, M, Fext, y);
+	for (int i = 0; i < N; ++i) {
+		t[i] = 0.0f;
+		for (int row = 0; row < M; ++row) {
+			t[i] += A[row * N + i] * y[row];
+		}
+		isFree[i] = t[i] > L[i] && t[i] < U[i];
+		if (t[i] <= L[i]) {
+			t[i] = L[i];
+		} else if (t[i] >= U[i]) {
+			t[i] = U[i];
+		}
+	}
+
+	int released = -1;
+	for (int it = 0; it < max_iters; ++it) {
+		int k = 0;
+		for (int i = 0; i < N; ++i) {
+			if (isFree[i]) {
+				cols[k++] = i;
+			}
+		}
+		for (int row = 0; row < M; ++row) {
+			r[row] = Fext[row];
+			for (int i = 0; i < N; ++i) {
+				if (!isFree[i]) {
+					r[row] -= A[row * N + i] * t[i];
+				}
+			}
+		}
+		factor_gram(A, M, N, cols, k, lambda, S);
+		chol_solve(S, M, r, y);
+
+		// Move the free tensions towards their optimum, stopping at the
+		// first bound that gets in the way
+		float alpha = 1.0f;
+		int blocking = -1;
+		float blockingBound = 0.0f;
+		float step[HANGPRINTER_MAX_ANCHORS];
+		for (int p = 0; p < k; ++p) {
+			const int i = cols[p];
+			float target = 0.0f;
+			for (int row = 0; row < M; ++row) {
+				target += A[row * N + i] * y[row];
+			}
+			step[p] = target - t[i];
+			const float bound = step[p] > 0.0f ? U[i] : L[i];
+			if (step[p] != 0.0f && (bound - t[i]) / step[p] < alpha) {
+				alpha = (bound - t[i]) / step[p];
+				blocking = i;
+				blockingBound = bound;
+			}
+		}
+		if (alpha < 0.0f) {
+			alpha = 0.0f;
+		}
+		for (int p = 0; p < k; ++p) {
+			t[cols[p]] += alpha * step[p];
+		}
+		if (blocking >= 0) {
+			t[blocking] = blockingBound;
+			isFree[blocking] = false;
+			if (blocking == released) {
+				break;
+			}
+			continue;
+		}
+
+		// The free tensions are optimal. Release the bound tension that
+		// most wants to move into its range, if any.
+		float worst = tol;
+		released = -1;
+		for (int i = 0; i < N; ++i) {
+			if (isFree[i] || U[i] <= L[i]) {
+				continue;
+			}
+			float mu = t[i];
+			for (int row = 0; row < M; ++row) {
+				mu -= A[row * N + i] * y[row];
+			}
+			const float want = t[i] <= L[i] ? -mu : mu;
+			if (want > worst) {
+				worst = want;
+				released = i;
+			}
+		}
+		if (released < 0) {
+			break;
+		}
+		isFree[released] = true;
+	}
+}
+
 void HangprinterKinematics::StaticForcesTikhonov(
 	const float mover[3],
 	const StaticForcesConfig &cfg,
 	StaticForcesResult &out) const noexcept
 {
 	float *T = out.tensions;
-	float A[3 * HANGPRINTER_MAX_ANCHORS] = {0.0f};
-	build_direction_matrix(mover, anchors, numAnchors, A);
+	const bool hasAttachments = invAttachmentRadius > 0.0F;
+	const int M = hasAttachments ? 6 : 3;
+	const float lambda = hasAttachments ? cfg.lambdaMoments : cfg.lambda;
+	float A[HANGPRINTER_MAX_ROWS * HANGPRINTER_MAX_ANCHORS] = {0.0f};
+	if (hasAttachments) {
+		build_wrench_matrix(mover, anchors, attachments, invAttachmentRadius, numAnchors, A);
+	} else {
+		build_direction_matrix(mover, anchors, numAnchors, A);
+	}
 
-	out.requestedForce[0] = 0.0F;
-	out.requestedForce[1] = 0.0F;
-	out.requestedForce[2] = 0.0F;
+	// Requested force, followed by the requested moment (always zero)
+	float wrench[HANGPRINTER_MAX_ROWS] = { 0.0F };
 	for (size_t i = 0; i < numAnchors; ++i) {
 		T[i] = 0.0f;
 	}
 
 	if (!cfg.ignoreGravity) {
-		out.requestedForce[2] = cfg.massKg * cfg.g;
-		solve_min_norm_T(A, numAnchors, out.requestedForce, cfg.lambda, T);
+		wrench[2] = cfg.massKg * cfg.g;
+		solve_min_norm_T(A, M, numAnchors, wrench, lambda, T);
 	}
+	out.requestedForce[0] = wrench[0];
+	out.requestedForce[1] = wrench[1];
+	out.requestedForce[2] = wrench[2];
 
 	if (!cfg.ignorePretension) {
 		float P[HANGPRINTER_MAX_ANCHORS * HANGPRINTER_MAX_ANCHORS] = {0.0f};
-		build_null_projector(A, numAnchors, cfg.lambda, P);
+		build_null_projector(A, M, numAnchors, lambda, P);
 		for (int it = 0; it < cfg.maxItersTarget; ++it) {
 			float gradient[HANGPRINTER_MAX_ANCHORS] = {0.0f};
 			for (size_t i = 0; i < numAnchors; ++i) {
@@ -1897,15 +2014,22 @@ void HangprinterKinematics::StaticForcesQp(
 	StaticForcesResult &out) const noexcept
 {
 	float *T = out.tensions;
-	float A[3 * HANGPRINTER_MAX_ANCHORS] = {0.0f};
-	build_direction_matrix(mover, anchors, numAnchors, A);
-
-	out.requestedForce[0] = 0.0F;
-	out.requestedForce[1] = 0.0F;
-	out.requestedForce[2] = 0.0F;
-	if (!cfg.ignoreGravity) {
-		out.requestedForce[2] = cfg.massKg * cfg.g;
+	const bool hasAttachments = invAttachmentRadius > 0.0F;
+	float A[HANGPRINTER_MAX_ROWS * HANGPRINTER_MAX_ANCHORS] = {0.0f};
+	if (hasAttachments) {
+		build_wrench_matrix(mover, anchors, attachments, invAttachmentRadius, numAnchors, A);
+	} else {
+		build_direction_matrix(mover, anchors, numAnchors, A);
 	}
+
+	// Requested force, followed by the requested moment (always zero)
+	float wrench[HANGPRINTER_MAX_ROWS] = { 0.0F };
+	if (!cfg.ignoreGravity) {
+		wrench[2] = cfg.massKg * cfg.g;
+	}
+	out.requestedForce[0] = wrench[0];
+	out.requestedForce[1] = wrench[1];
+	out.requestedForce[2] = wrench[2];
 
 	float L[HANGPRINTER_MAX_ANCHORS];
 	float U[HANGPRINTER_MAX_ANCHORS];
@@ -1921,7 +2045,11 @@ void HangprinterKinematics::StaticForcesQp(
 		U[i] = ui;
 	}
 
-	solve_box_ridge_ls(A, numAnchors, out.requestedForce, cfg.lambda, L, U, cfg.maxItersTarget, cfg.tol, T);
+	if (hasAttachments) {
+		solve_box_min_norm(A, 6, numAnchors, wrench, cfg.lambdaMoments, L, U, cfg.maxItersTarget, cfg.tol, T);
+	} else {
+		solve_box_ridge_ls(A, numAnchors, out.requestedForce, cfg.lambda, L, U, cfg.maxItersTarget, cfg.tol, T);
+	}
 
 	applyA(A, numAnchors, T, out.achievedForce);
 	out.residual[0] = out.requestedForce[0] - out.achievedForce[0];

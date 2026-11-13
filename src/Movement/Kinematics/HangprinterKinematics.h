@@ -20,6 +20,8 @@ enum class HangprinterAnchorMode {
 };
 
 constexpr size_t HANGPRINTER_MAX_ANCHORS = 8;
+// Three force rows, plus three moment rows when attachments are configured
+constexpr size_t HANGPRINTER_MAX_ROWS = 6;
 
 class HangprinterKinematics : public RoundBedKinematics
 {
@@ -107,6 +109,8 @@ private:
 	float minForce_Newton[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	float maxForce_Newton[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	float guyWireLengths[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
+	// Line attachment points on the mover, relative to its centre of mass
+	float attachments[HANGPRINTER_MAX_ANCHORS][3] = { { 0.0F } };
 	float torqueConstants[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 
 	FlexAlgorithm flexAlgorithm = FlexAlgorithm::Qp;
@@ -127,6 +131,8 @@ private:
 	float stepsPerMmAtOrigin[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	bool useConstantSpoolModel[HANGPRINTER_MAX_ANCHORS] = { false };
 	float distancesOrigin[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
+	// 1 / (RMS attachment distance). Zero means no moment equations.
+	float invAttachmentRadius = 0.0F;
 	float printRadiusSquared = 0.0F;
 
 	float SpringK(float const springLength) const noexcept;
@@ -137,6 +143,10 @@ private:
 		float massKg = 0.0f;
 		float g = 9.81f;
 		float lambda = 1e-3f;
+		// Regularization of the force and moment equations. Balancing moments can
+		// take tension changes that are large compared to the moment they correct,
+		// so these equations are held much harder than lambda would.
+		float lambdaMoments = 1e-5f;
 		float tol = 1e-3f;
 		float stepDamp = 0.75f;
 		int maxItersTarget = 100;
