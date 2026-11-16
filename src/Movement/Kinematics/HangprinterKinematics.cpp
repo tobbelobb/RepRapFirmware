@@ -370,7 +370,7 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 			{
 				reply.catf(":%d", (int)fullStepsPerMotorRev[i]);
 			}
-			reply.lcatf("W%.2f\n", (double)moverWeight_kg);
+			reply.lcatf("W%.5f\n", (double)moverWeight_kg);
 			reply.lcatf("S%.2f\n", (double)springKPerUnitLength);
 
 			reply.lcatf("I%.1f", (double)minForce_Newton[0]);
@@ -462,7 +462,7 @@ MovementError HangprinterKinematics::CartesianToMotorSteps(const float machinePo
 		else
 		{
 			// This logic should be called LinePosToMotorPos
-			RoundToInt32(rslt, k0[i] * (fastSqrtf(spoolRadiiSq[i] + linePos[i] * k2[i]) - spoolRadii[i]), motorPos[i]);
+			RoundToInt32(rslt, linePos[i] * (k0[i] * k2[i]) / (fastSqrtf(spoolRadiiSq[i] + linePos[i] * k2[i]) + spoolRadii[i]), motorPos[i]);
 		}
 	}
 
@@ -476,7 +476,8 @@ inline float HangprinterKinematics::MotorPosToLinePos(const int32_t motorPos, si
 	{
 		return (float)motorPos / stepsPerMmAtOrigin[axis];
 	}
-	return (fsquare(motorPos / k0[axis] + spoolRadii[axis]) - spoolRadiiSq[axis]) / k2[axis];
+	const float deltaRadius = motorPos / k0[axis];
+	return deltaRadius * (2.0F * spoolRadii[axis] + deltaRadius) / k2[axis];
 }
 
 
@@ -515,8 +516,8 @@ float HangprinterKinematics::ResidualsAndDerivatives(
                                      float jacobian[HANGPRINTER_MAX_ANCHORS][3],
                                      float (*hessians)[3][3]) const noexcept {
 	float baseImpact[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
-	float impactPlus[HANGPRINTER_MAX_ANCHORS][3] = { 0.0F };
-	float impactMinus[HANGPRINTER_MAX_ANCHORS][3] = { 0.0F };
+	float impactPlus[3][HANGPRINTER_MAX_ANCHORS] = { 0.0F };
+	float impactMinus[3][HANGPRINTER_MAX_ANCHORS] = { 0.0F };
 	constexpr float impactStep = 1e-3F;
 
 	if (flexEnabled) {
@@ -1511,17 +1512,17 @@ static inline void build_wrench_matrix(const float mover[3], const float anchors
 	}
 }
 
-static inline bool chol_decompose(float *G, int k);
-static inline void chol_solve(const float *L, int k, const float *b, float *x);
+static inline bool chol_decompose(double *G, int k);
+static inline void chol_solve(const double *L, int k, const double *b, double *x);
 
 // Cholesky factor of A_f A_f^T + lambda I (M x M), where A_f holds the
 // columns of A listed in cols
-static inline void factor_gram(const float *A, int M, int N, const int *cols, int k, float lambda, float *S) {
+static inline void factor_gram(const float *A, int M, int N, const int *cols, int k, float lambda, double *S) {
 	for (int r = 0; r < M; ++r) {
 		for (int c = 0; c <= r; ++c) {
-			float acc = r == c ? lambda : 0.0f;
+			double acc = r == c ? lambda : 0.0f;
 			for (int p = 0; p < k; ++p) {
-				acc += A[r * N + cols[p]] * A[c * N + cols[p]];
+				acc += double(A[r * N + cols[p]]) * A[c * N + cols[p]];
 			}
 			S[r * M + c] = acc;
 			S[c * M + r] = acc;
@@ -1535,12 +1536,14 @@ static inline void solve_min_norm_T(const float *A, int M, int N, const float *F
 	for (int j = 0; j < N; ++j) {
 		cols[j] = j;
 	}
-	float S[HANGPRINTER_MAX_ROWS * HANGPRINTER_MAX_ROWS];
+	double S[HANGPRINTER_MAX_ROWS * HANGPRINTER_MAX_ROWS];
 	factor_gram(A, M, N, cols, N, lambda, S);
-	float y[HANGPRINTER_MAX_ROWS];
-	chol_solve(S, M, Fext, y);
+	double y[HANGPRINTER_MAX_ROWS];
+	double rhs[HANGPRINTER_MAX_ROWS];
+	for (int row = 0; row < M; ++row) rhs[row] = Fext[row];
+	chol_solve(S, M, rhs, y);
 	for (int j = 0; j < N; ++j) {
-		float acc = 0.0f;
+		double acc = 0.0f;
 		for (int r = 0; r < M; ++r) {
 			acc += A[r * N + j] * y[r];
 		}
@@ -1553,16 +1556,16 @@ static inline void build_null_projector(const float *A, int M, int N, float lamb
 	for (int j = 0; j < N; ++j) {
 		cols[j] = j;
 	}
-	float S[HANGPRINTER_MAX_ROWS * HANGPRINTER_MAX_ROWS];
+	double S[HANGPRINTER_MAX_ROWS * HANGPRINTER_MAX_ROWS];
 	factor_gram(A, M, N, cols, N, lambda, S);
 	for (int c = 0; c < N; ++c) {
-		float col[HANGPRINTER_MAX_ROWS], B[HANGPRINTER_MAX_ROWS];
+		double col[HANGPRINTER_MAX_ROWS], B[HANGPRINTER_MAX_ROWS];
 		for (int r = 0; r < M; ++r) {
 			col[r] = A[r * N + c];
 		}
 		chol_solve(S, M, col, B);
 		for (int r = 0; r < N; ++r) {
-			float Mrc = 0.0f;
+			double Mrc = 0.0f;
 			for (int k = 0; k < M; ++k) {
 				Mrc += A[k * N + r] * B[k];
 			}
@@ -1573,7 +1576,7 @@ static inline void build_null_projector(const float *A, int M, int N, float lamb
 
 static inline void proj_nullspace(const float *P, int N, const float *v, float *out) {
 	for (int r = 0; r < N; ++r) {
-		float acc = 0.0f;
+		double acc = 0.0f;
 		for (int c = 0; c < N; ++c) {
 			acc += P[r * N + c] * v[c];
 		}
@@ -1596,11 +1599,11 @@ static inline void applyA(const float* A, int N, const float* T, float res[3])
 	res[2] = fz;
 }
 
-static inline bool chol_decompose(float *G, int k) {
+static inline bool chol_decompose(double *G, int k) {
 	const float eps = 1e-7;
 	for (int i = 0; i < k; ++i) {
 		for (int j = 0; j <= i; ++j) {
-			float s = G[i * k + j];
+			double s = G[i * k + j];
 			for (int p = 0; p < j; ++p) {
 				s -= G[i * k + p] * G[j * k + p];
 			}
@@ -1620,10 +1623,10 @@ static inline bool chol_decompose(float *G, int k) {
 	return true;
 }
 
-static inline void chol_solve(const float *L, int k, const float *b, float *x) {
-	float y[HANGPRINTER_MAX_ANCHORS] = { 0.0 };
+static inline void chol_solve(const double *L, int k, const double *b, double *x) {
+	double y[HANGPRINTER_MAX_ANCHORS] = { 0.0 };
 	for (int i = 0; i < k; ++i) {
-		float s = b[i];
+		double s = b[i];
 		for (int p = 0; p < i; ++p) {
 			s -= L[i * k + p] * y[p];
 		}
@@ -1631,7 +1634,7 @@ static inline void chol_solve(const float *L, int k, const float *b, float *x) {
 	}
 	std::fill_n(x, k, 0.0);
 	for (int i = k - 1; i >= 0; --i) {
-		float s = y[i];
+		double s = y[i];
 		for (int p = i + 1; p < k; ++p) {
 			s -= L[p * k + i] * x[p];
 		}
@@ -1648,15 +1651,17 @@ static inline void chol_solve(const float *L, int k, const float *b, float *x) {
 static inline void solve_box_min_norm(const float *A, int M, int N, const float *Fext, float lambda, const float *L, const float *U, int max_iters, float tol, float *t) {
 	bool isFree[HANGPRINTER_MAX_ANCHORS];
 	int cols[HANGPRINTER_MAX_ANCHORS] = { 0 };
-	float S[HANGPRINTER_MAX_ROWS * HANGPRINTER_MAX_ROWS];
-	float r[HANGPRINTER_MAX_ROWS], y[HANGPRINTER_MAX_ROWS];
+	double S[HANGPRINTER_MAX_ROWS * HANGPRINTER_MAX_ROWS];
+	double r[HANGPRINTER_MAX_ROWS], y[HANGPRINTER_MAX_ROWS];
 
 	// Start from the unbounded solution, clamped into the bounds
 	for (int i = 0; i < N; ++i) {
 		cols[i] = i;
 	}
 	factor_gram(A, M, N, cols, N, lambda, S);
-	chol_solve(S, M, Fext, y);
+	double rhs[HANGPRINTER_MAX_ROWS];
+	for (int row = 0; row < M; ++row) rhs[row] = Fext[row];
+	chol_solve(S, M, rhs, y);
 	for (int i = 0; i < N; ++i) {
 		t[i] = 0.0f;
 		for (int row = 0; row < M; ++row) {
@@ -1682,7 +1687,7 @@ static inline void solve_box_min_norm(const float *A, int M, int N, const float 
 			r[row] = Fext[row];
 			for (int i = 0; i < N; ++i) {
 				if (!isFree[i]) {
-					r[row] -= A[row * N + i] * t[i];
+					r[row] -= double(A[row * N + i]) * t[i];
 				}
 			}
 		}
@@ -1691,18 +1696,18 @@ static inline void solve_box_min_norm(const float *A, int M, int N, const float 
 
 		// Move the free tensions towards their optimum, stopping at the
 		// first bound that gets in the way
-		float alpha = 1.0f;
+		double alpha = 1.0f;
 		int blocking = -1;
-		float blockingBound = 0.0f;
-		float step[HANGPRINTER_MAX_ANCHORS];
+		double blockingBound = 0.0f;
+		double step[HANGPRINTER_MAX_ANCHORS];
 		for (int p = 0; p < k; ++p) {
 			const int i = cols[p];
-			float target = 0.0f;
+			double target = 0.0f;
 			for (int row = 0; row < M; ++row) {
 				target += A[row * N + i] * y[row];
 			}
 			step[p] = target - t[i];
-			const float bound = step[p] > 0.0f ? U[i] : L[i];
+			const double bound = step[p] > 0.0f ? U[i] : L[i];
 			if (step[p] != 0.0f && (bound - t[i]) / step[p] < alpha) {
 				alpha = (bound - t[i]) / step[p];
 				blocking = i;
@@ -1718,25 +1723,24 @@ static inline void solve_box_min_norm(const float *A, int M, int N, const float 
 		if (blocking >= 0) {
 			t[blocking] = blockingBound;
 			isFree[blocking] = false;
-			if (blocking == released) {
-				break;
-			}
+			// A released lower bound may legitimately reach the upper bound
+			// (or vice versa); continue optimizing the remaining tensions.
 			continue;
 		}
 
 		// The free tensions are optimal. Release the bound tension that
 		// most wants to move into its range, if any.
-		float worst = tol;
+		double worst = tol;
 		released = -1;
 		for (int i = 0; i < N; ++i) {
 			if (isFree[i] || U[i] <= L[i]) {
 				continue;
 			}
-			float mu = t[i];
+			double mu = t[i];
 			for (int row = 0; row < M; ++row) {
 				mu -= A[row * N + i] * y[row];
 			}
-			const float want = t[i] <= L[i] ? -mu : mu;
+			const double want = t[i] <= L[i] ? -mu : mu;
 			if (want > worst) {
 				worst = want;
 				released = i;
@@ -1748,6 +1752,7 @@ static inline void solve_box_min_norm(const float *A, int M, int N, const float 
 		isFree[released] = true;
 	}
 }
+
 
 void HangprinterKinematics::StaticForcesTikhonov(
 	const float mover[3],
@@ -1807,13 +1812,13 @@ void HangprinterKinematics::StaticForcesTikhonov(
 				T[i] -= cfg.stepDamp * d[i];
 			}
 		}
-		for (size_t i = 0; i < numAnchors; ++i) {
-			if (T[i] < 0.0f) {
-				T[i] = 0.0f;
-			}
-			if (cfg.Tmax && T[i] > cfg.Tmax[i]) {
-				T[i] = cfg.Tmax[i];
-			}
+	}
+	for (size_t i = 0; i < numAnchors; ++i) {
+		if (T[i] < 0.0f) {
+			T[i] = 0.0f;
+		}
+		if (cfg.Tmax && T[i] > cfg.Tmax[i]) {
+			T[i] = cfg.Tmax[i];
 		}
 	}
 
