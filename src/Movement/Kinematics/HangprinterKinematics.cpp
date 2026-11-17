@@ -617,6 +617,47 @@ void HangprinterKinematics::AccumulateJtJandGrad(
 // https://doi.org/10.1007/978-3-031-94608-0_1
 // Extensive testing and comparisons to other methods done in
 // github.com/tobbelobb/hangprinter-forward-transform
+// Subtract squared ranges to obtain a rigid seed without a mirror branch.
+// Double intermediates avoid cancellation in the squared millimetre ranges.
+// Reject nearly planar layouts: their ranges cannot reliably identify a side.
+static bool rangeSeed(const float anchors[][3], const float *origins,
+                      const float *lines, size_t count, float seed[3]) {
+    double system[3][4] = {};
+    const double d0 = double(origins[0]) + lines[0];
+    for (size_t i = 1; i < count; ++i) {
+        double row[3], rhs = (d0 - (double(origins[i]) + lines[i]))
+            * (d0 + double(origins[i]) + lines[i]);
+        for (size_t j = 0; j < 3; ++j) {
+            row[j] = 2.0 * (double(anchors[i][j]) - anchors[0][j]);
+            rhs += (double(anchors[i][j]) - anchors[0][j])
+                 * (double(anchors[i][j]) + anchors[0][j]);
+        }
+        for (size_t r = 0; r < 3; ++r) {
+            for (size_t c = 0; c < 3; ++c) system[r][c] += row[r] * row[c];
+            system[r][3] += row[r] * rhs;
+        }
+    }
+    double scale = std::max({system[0][0], system[1][1], system[2][2]});
+    for (size_t j = 0; j < 3; ++j) {
+        size_t pivot = j;
+        for (size_t r = j + 1; r < 3; ++r)
+            if (std::abs(system[r][j]) > std::abs(system[pivot][j])) pivot = r;
+        if (std::abs(system[pivot][j]) <= scale * 1e-8) return false;
+        for (size_t c = 0; c < 4; ++c) std::swap(system[j][c], system[pivot][c]);
+        double divisor = system[j][j];
+        for (size_t c = j; c < 4; ++c) system[j][c] /= divisor;
+        for (size_t r = 0; r < 3; ++r) if (r != j) {
+            double factor = system[r][j];
+            for (size_t c = j; c < 4; ++c) system[r][c] -= factor * system[j][c];
+        }
+    }
+    for (size_t j = 0; j < 3; ++j) {
+        if (!std::isfinite(system[j][3])) return false;
+        seed[j] = system[j][3];
+    }
+    return true;
+}
+
 HangprinterKinematics::SolverResult HangprinterKinematics::SolveHybrid(
                                       const float linePositions[HANGPRINTER_MAX_ANCHORS],
                                       float initial[3],
@@ -628,6 +669,14 @@ HangprinterKinematics::SolverResult HangprinterKinematics::SolveHybrid(
 	result.pos[0] = initial[0];
 	result.pos[1] = initial[1];
 	result.pos[2] = initial[2];
+    if (numAnchors >= 4) {
+        float candidate[3], residuals[HANGPRINTER_MAX_ANCHORS], J[HANGPRINTER_MAX_ANCHORS][3];
+        if (!rangeSeed(anchors, distancesOrigin, linePositions, numAnchors, candidate))
+            return result;
+        float candidateCost = ResidualsAndDerivatives(linePositions, candidate, residuals, J, nullptr);
+        float initialCost = ResidualsAndDerivatives(linePositions, initial, residuals, J, nullptr);
+        if (candidateCost < initialCost) for (size_t j = 0; j < 3; ++j) result.pos[j] = candidate[j];
+    }
 	size_t iter = 0;
 	for (; iter < halleyIters && iter < maxIters; ++iter) {
 		float residuals[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
@@ -1784,6 +1833,7 @@ void HangprinterKinematics::StaticForcesTikhonov(
 	out.requestedForce[1] = wrench[1];
 	out.requestedForce[2] = wrench[2];
 
+    // Tmin is a soft target in Tikhonov; only zero and Tmax are hard limits.
 	if (!cfg.ignorePretension) {
 		float P[HANGPRINTER_MAX_ANCHORS * HANGPRINTER_MAX_ANCHORS] = {0.0f};
 		build_null_projector(A, M, numAnchors, lambda, P);
