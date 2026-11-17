@@ -6,6 +6,7 @@
  */
 
 #include "HangprinterKinematics.h"
+#include "ForwardWorkspace.h"
 
 #if SUPPORT_HANGPRINTER
 
@@ -221,7 +222,14 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 		const bool seenNonGeometry = TryConfigureSegmentation(gb);
 		if (gb.Seen('N'))
 		{
-			numAnchors = gb.GetUIValue();
+			const auto count = gb.GetUIValue();
+            if (count < 3 || count > HANGPRINTER_MAX_ANCHORS
+                || (anchorMode == HangprinterAnchorMode::CubeCorner && count != 8)) {
+                reply.copy("Anchor count must be 3..8; CubeCorner requires exactly 8");
+                error = true;
+                return false;
+            }
+            numAnchors = count;
 			seen = true;
 		}
 		for (size_t i = 0; i < numAnchors; ++i)
@@ -263,14 +271,16 @@ bool HangprinterKinematics::Configure(unsigned int mCode, GCodeBuffer& gb, const
 		}
 		bool geometryParamSeen = false;
 		bool seenFlexParam = false;
-		// 0=None, 1=last-top, 2=all-top, 3-half-top, etc
-		uint32_t unsignedAnchorMode = (uint32_t)anchorMode;
-		if (gb.TryGetUIValue('A', unsignedAnchorMode, geometryParamSeen))
-		{
-			if (unsignedAnchorMode <= (uint32_t)HangprinterAnchorMode::AllOnTop) {
-				anchorMode = (HangprinterAnchorMode)unsignedAnchorMode;
-			}
-		}
+        uint32_t unsignedAnchorMode = (uint32_t)anchorMode;
+        if (gb.TryGetUIValue('A', unsignedAnchorMode, geometryParamSeen)) {
+            if (unsignedAnchorMode > (uint32_t)HangprinterAnchorMode::CubeCorner
+                || (unsignedAnchorMode == (uint32_t)HangprinterAnchorMode::CubeCorner && numAnchors != 8)) {
+                reply.copy("Anchor mode must be 0..3; CubeCorner requires exactly 8 anchors");
+                error = true;
+                return false;
+            }
+            anchorMode = (HangprinterAnchorMode)unsignedAnchorMode;
+        }
 		gb.TryGetFValue('Q', spoolBuildupFactor, geometryParamSeen);
 		gb.TryGetFloatArray('R', numAnchors, spoolRadii, geometryParamSeen);
 		gb.TryGetUIArray('U', numAnchors, mechanicalAdvantage, geometryParamSeen);
@@ -617,47 +627,6 @@ void HangprinterKinematics::AccumulateJtJandGrad(
 // https://doi.org/10.1007/978-3-031-94608-0_1
 // Extensive testing and comparisons to other methods done in
 // github.com/tobbelobb/hangprinter-forward-transform
-// Subtract squared ranges to obtain a rigid seed without a mirror branch.
-// Double intermediates avoid cancellation in the squared millimetre ranges.
-// Reject nearly planar layouts: their ranges cannot reliably identify a side.
-static bool rangeSeed(const float anchors[][3], const float *origins,
-                      const float *lines, size_t count, float seed[3]) {
-    double system[3][4] = {};
-    const double d0 = double(origins[0]) + lines[0];
-    for (size_t i = 1; i < count; ++i) {
-        double row[3], rhs = (d0 - (double(origins[i]) + lines[i]))
-            * (d0 + double(origins[i]) + lines[i]);
-        for (size_t j = 0; j < 3; ++j) {
-            row[j] = 2.0 * (double(anchors[i][j]) - anchors[0][j]);
-            rhs += (double(anchors[i][j]) - anchors[0][j])
-                 * (double(anchors[i][j]) + anchors[0][j]);
-        }
-        for (size_t r = 0; r < 3; ++r) {
-            for (size_t c = 0; c < 3; ++c) system[r][c] += row[r] * row[c];
-            system[r][3] += row[r] * rhs;
-        }
-    }
-    double scale = std::max({system[0][0], system[1][1], system[2][2]});
-    for (size_t j = 0; j < 3; ++j) {
-        size_t pivot = j;
-        for (size_t r = j + 1; r < 3; ++r)
-            if (std::abs(system[r][j]) > std::abs(system[pivot][j])) pivot = r;
-        if (std::abs(system[pivot][j]) <= scale * 1e-8) return false;
-        for (size_t c = 0; c < 4; ++c) std::swap(system[j][c], system[pivot][c]);
-        double divisor = system[j][j];
-        for (size_t c = j; c < 4; ++c) system[j][c] /= divisor;
-        for (size_t r = 0; r < 3; ++r) if (r != j) {
-            double factor = system[r][j];
-            for (size_t c = j; c < 4; ++c) system[r][c] -= factor * system[j][c];
-        }
-    }
-    for (size_t j = 0; j < 3; ++j) {
-        if (!std::isfinite(system[j][3])) return false;
-        seed[j] = system[j][3];
-    }
-    return true;
-}
-
 HangprinterKinematics::SolverResult HangprinterKinematics::SolveHybrid(
                                       const float linePositions[HANGPRINTER_MAX_ANCHORS],
                                       float initial[3],
@@ -669,14 +638,26 @@ HangprinterKinematics::SolverResult HangprinterKinematics::SolveHybrid(
 	result.pos[0] = initial[0];
 	result.pos[1] = initial[1];
 	result.pos[2] = initial[2];
-    if (numAnchors >= 4) {
-        float candidate[3], residuals[HANGPRINTER_MAX_ANCHORS], J[HANGPRINTER_MAX_ANCHORS][3];
-        if (!rangeSeed(anchors, distancesOrigin, linePositions, numAnchors, candidate))
-            return result;
-        float candidateCost = ResidualsAndDerivatives(linePositions, candidate, residuals, J, nullptr);
-        float initialCost = ResidualsAndDerivatives(linePositions, initial, residuals, J, nullptr);
-        if (candidateCost < initialCost) for (size_t j = 0; j < 3; ++j) result.pos[j] = candidate[j];
+    double geometry[HANGPRINTER_MAX_ANCHORS][3], ranges[HANGPRINTER_MAX_ANCHORS];
+    for (size_t i=0;i<numAnchors;++i) {
+        for (size_t j=0;j<3;++j) geometry[i][j]=anchors[i][j];
+        ranges[i]=double(distancesOrigin[i])+linePositions[i];
     }
+    double candidates[3][3], normal[3]; int planar=0;
+    int candidateCount=hp_range_candidates(geometry,ranges,numAnchors,candidates,normal,&planar);
+    if (!candidateCount) return result;
+    float residuals0[HANGPRINTER_MAX_ANCHORS], J0[HANGPRINTER_MAX_ANCHORS][3];
+    double initialPos[3]={initial[0],initial[1],initial[2]};
+    result.cost=hp_forward_allowed(geometry,numAnchors,(int)anchorMode,normal,planar,initialPos)
+        ? ResidualsAndDerivatives(linePositions,initial,residuals0,J0,nullptr)
+        : std::numeric_limits<float>::infinity();
+    for (int i=0;i<candidateCount;++i) {
+        if (!hp_forward_allowed(geometry,numAnchors,(int)anchorMode,normal,planar,candidates[i])) continue;
+        float trial[3]={(float)candidates[i][0],(float)candidates[i][1],(float)candidates[i][2]};
+        float cost=ResidualsAndDerivatives(linePositions,trial,residuals0,J0,nullptr);
+        if (cost<result.cost) { result.cost=cost;for (int j=0;j<3;++j) result.pos[j]=trial[j]; }
+    }
+    if (!std::isfinite(result.cost)) return result;
 	size_t iter = 0;
 	for (; iter < halleyIters && iter < maxIters; ++iter) {
 		float residuals[HANGPRINTER_MAX_ANCHORS] = { 0.0F };
@@ -728,6 +709,9 @@ HangprinterKinematics::SolverResult HangprinterKinematics::SolveHybrid(
 		result.pos[0] = result.pos[0] + delta[0];
 		result.pos[1] = result.pos[1] + delta[1];
 		result.pos[2] = result.pos[2] + delta[2];
+        double position[3]={result.pos[0],result.pos[1],result.pos[2]};
+        hp_reflect_above(geometry[0],normal,planar,position);
+        for (int j=0;j<3;++j) result.pos[j]=position[j];
 		result.iterations = iter + 1;
 		if (norm(delta) < tol) {
 			result.converged = true;
@@ -757,6 +741,9 @@ HangprinterKinematics::SolverResult HangprinterKinematics::SolveHybrid(
 		result.pos[0] = result.pos[0] + delta[0];
 		result.pos[1] = result.pos[1] + delta[1];
 		result.pos[2] = result.pos[2] + delta[2];
+        double position[3]={result.pos[0],result.pos[1],result.pos[2]};
+        hp_reflect_above(geometry[0],normal,planar,position);
+        for (int j=0;j<3;++j) result.pos[j]=position[j];
 		result.iterations = iter + 1;
 		if (norm(delta) < tol) {
 			result.converged = true;
@@ -768,8 +755,11 @@ HangprinterKinematics::SolverResult HangprinterKinematics::SolveHybrid(
 	float Jtmp[HANGPRINTER_MAX_ANCHORS][3];
 	result.cost =
 	    ResidualsAndDerivatives(linePositions, result.pos, residuals, Jtmp, nullptr);
+    double finalPosition[3]={result.pos[0],result.pos[1],result.pos[2]};
+    if (!hp_forward_allowed(geometry,numAnchors,(int)anchorMode,normal,planar,finalPosition)) result.converged=false;
 	return result;
 }
+
 
 // Convert motor coordinates to machine coordinates.
 void HangprinterKinematics::MotorStepsToCartesian(const int32_t motorPos[], const float stepsPerMm[], size_t numVisibleAxes, size_t numTotalAxes, float machinePos[]) const noexcept
@@ -808,71 +798,12 @@ void HangprinterKinematics::MotorStepsToCartesian(const int32_t motorPos[], cons
 // End of forward kinematics stuff
 
 
-static bool isSameSide(float const v0[3], float const v1[3], float const v2[3], float const v3[3], float const p[3]){
-	float const h0[3] = {v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]};
-	float const h1[3] = {v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2]};
-
-	float const normal[3] = {
-		h0[1]*h1[2] - h0[2]*h1[1],
-		h0[2]*h1[0] - h0[0]*h1[2],
-		h0[0]*h1[1] - h0[1]*h1[0]
-	};
-
-	float const dh0[3] = {v3[0] - v0[0], v3[1] - v0[1], v3[2] - v0[2]};
-	float const dh1[3] = { p[0] - v0[0],  p[1] - v0[1],  p[2] - v0[2]};
-
-	float const dot0 = dh0[0]*normal[0] + dh0[1]*normal[1] + dh0[2]*normal[2];
-	float const dot1 = dh1[0]*normal[0] + dh1[1]*normal[1] + dh1[2]*normal[2];
-	return dot0*dot1 > 0.0F;
-}
-
-bool HangprinterKinematics::IsInsidePyramidSides(float const coords[3]) const noexcept
+bool HangprinterKinematics::IsReachable(float axesCoords[MaxAxes], AxesBitmap axes) const noexcept
 {
-	bool reachable = true;
-
-	// Check all the planes defined by triangle sides in the pyramid
-	for (size_t i = 0; reachable && i < numAnchors - 1; ++i) {
-		reachable = reachable && isSameSide(anchors[i], anchors[(i+1) % (numAnchors - 1)], anchors[numAnchors - 1], anchors[(i+2) % (numAnchors - 1)], coords);
-	}
-	return reachable;
-}
-
-bool HangprinterKinematics::IsInsidePrismSides(float const coords[3], unsigned const discount_last) const noexcept
-{
-	bool reachable = true;
-
-	// For each side of the base, check the plane formed by side and another point bellow them in z.
-	for (size_t i = 0; reachable && i < numAnchors - discount_last; ++i) {
-		float const lower_point[3] = {anchors[i][0], anchors[i][1], anchors[i][2] - 1};
-		reachable = reachable && isSameSide(anchors[i], anchors[(i+1) % (numAnchors - 1)], lower_point, anchors[(i+2) % (numAnchors - 1)], coords);
-	}
-	return reachable;
-}
-
-// For each triangle side in a pseudo-pyramid, check if the point is inside the pyramid (Except for the base)
-// Also check that any point below the line between two exterior anchors (all anchors are exterior except for the last one)
-// is in the "inside part" all the way down to min_Z, however low it may be.
-// To further limit the movements in the X and Y axes one can simply set a smaller print radius.
-bool HangprinterKinematics::IsReachable(float axesCoords[MaxAxes], AxesBitmap axes) const noexcept /*override*/
-{
-	float const coords[3] = {axesCoords[X_AXIS], axesCoords[Y_AXIS], axesCoords[Z_AXIS]};
-	bool reachable = true;
-
-	switch (anchorMode) {
-		case HangprinterAnchorMode::None:
-			return true;
-
-		// This reaches a pyramid on top of the lower prism if the bed is below the lower anchors
-		case HangprinterAnchorMode::LastOnTop:
-		default:
-			reachable = IsInsidePyramidSides(coords);
-			return reachable && IsInsidePrismSides(coords, 1);
-
-		case HangprinterAnchorMode::AllOnTop:
-			return IsInsidePrismSides(coords, 0);
-	}
-
-	return reachable;
+    double geometry[HANGPRINTER_MAX_ANCHORS][3];
+    for (size_t i=0;i<numAnchors;++i) for (size_t j=0;j<3;++j) geometry[i][j]=anchors[i][j];
+    double position[3]={axesCoords[0],axesCoords[1],axesCoords[2]};
+    return hp_reachable(geometry,numAnchors,(int)anchorMode,position);
 }
 
 // Limit the Cartesian position that the user wants to move to returning true if we adjusted the position
@@ -907,6 +838,9 @@ LimitPositionResult HangprinterKinematics::LimitPosition(float finalCoords[], co
 				limited = true;
 			}
 		}
+        if (!IsReachable(finalCoords, axesToLimit)) {
+            return LimitPositionResult::intermediateUnreachable;
+        }
 	}
 
 	//TODO check intermediate positions, especially uif.when we support an offset radius

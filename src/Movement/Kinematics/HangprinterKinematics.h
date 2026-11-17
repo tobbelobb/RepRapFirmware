@@ -14,9 +14,10 @@
 
 // Different modes can be configured for different tradeoffs in terms of printing volumes and speeds
 enum class HangprinterAnchorMode {
-	None, // All is reacheable in None anchor mode as printing volume
-	LastOnTop, // (Default) Results in a pyramid plus a prism below if the lower anchors are above the printing bed
-	AllOnTop, // Result in a prism (speeds get limited, specially going down in Z)
+	None = 0, // No workspace restriction
+	LastOnTop = 1, // Results in a pyramid plus a prism below if the lower anchors are above the printing bed
+	AllOnTop = 2, // Vertical prism under or above the perimeter
+	CubeCorner = 3, // Four upper then four corresponding lower corners, plus lower prism
 };
 
 constexpr size_t HANGPRINTER_MAX_ANCHORS = 8;
@@ -68,8 +69,6 @@ public:
 protected:
 	DECLARE_OBJECT_MODEL_WITH_ARRAYS
 
-	bool IsInsidePyramidSides(float const coords[3]) const noexcept;
-	bool IsInsidePrismSides(float const coords[3], unsigned const discount_last) const noexcept;
 
 private:
 	enum class FlexAlgorithm : uint8_t { None = 0, Qp = 1, Tikhonov = 2 };
