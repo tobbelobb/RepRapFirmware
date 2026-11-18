@@ -2280,7 +2280,6 @@ void Move::FreeOldSegments(const uint32_t beforeTime) noexcept
 	{
 		DriveMovement& dm = dms[drive];
 		MoveSegment *seg = dm.segments;
-		MoveSegment *prev = nullptr;
 
 		// Walk the segment list and free completed segments
 		// Since segments are ordered by time, we can stop at the first non-expired segment
@@ -2294,15 +2293,7 @@ void Move::FreeOldSegments(const uint32_t beforeTime) noexcept
 				MoveSegment *toFree = seg;
 				seg = seg->GetNext();
 
-				// Unlink from list
-				if (prev == nullptr)
-				{
-					dm.segments = seg;
-				}
-				else
-				{
-					prev->SetNext(seg);
-				}
+				dm.segments = seg;
 
 				// Advance the motor position as the step ISR does at the end of a segment. Otherwise the live
 				// motor positions of drives without local steps stay at zero, and every wait for standstill
@@ -2318,6 +2309,22 @@ void Move::FreeOldSegments(const uint32_t beforeTime) noexcept
 					const int32_t netSteps = (int32_t)(length + dm.distanceCarriedForwards);
 					dm.currentMotorPosition += netSteps;
 					dm.distanceCarriedForwards += length - (motioncalc_t)netSteps;
+				}
+
+				// Apply the step ISR's final-axis tolerance (CalcNextStepTimeFull).
+				// The remaining fraction may be just short of a whole microstep.
+				if (seg == nullptr && !toFree->GetFlags().isExtruder)
+				{
+					const motioncalc_t residual = std::fabs(dm.distanceCarriedForwards);
+					if (residual > (motioncalc_t)0.95)
+					{
+						dm.currentMotorPosition += (dm.distanceCarriedForwards > (motioncalc_t)0.0) ? 1 : -1;
+						dm.distanceCarriedForwards = (motioncalc_t)0.0;
+					}
+					else if (residual < (motioncalc_t)0.05)
+					{
+						dm.distanceCarriedForwards = (motioncalc_t)0.0;
+					}
 				}
 				dm.positionAtSegmentStart = dm.currentMotorPosition;
 
